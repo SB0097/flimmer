@@ -49,11 +49,19 @@ describe('lockupToSummary', () => {
         avatar: { url: 'https://yt3/avatar', width: 68, height: 68 },
       },
       durationSeconds: 7957,
-      viewCountText: '4 Mio.',
+      viewCountText: '4 Mio. Aufrufe',
       publishedText: 'vor 7 Monaten',
       thumbnails: [{ url: 'https://i.ytimg.com/vi/x/hq.jpg', width: 336, height: 188 }],
       isLive: false,
     });
+  });
+
+  it('lässt vollständige Texte wie „aktive Zuschauer“ unverändert', () => {
+    const live = lockup();
+    live.metadata!.metadata!.metadata_rows![1] = {
+      metadata_parts: [{ text: text('10.551 aktive Zuschauer') }],
+    };
+    expect(lockupToSummary(live)?.viewCountText).toBe('10.551 aktive Zuschauer');
   });
 
   it('erkennt Livestreams', () => {
