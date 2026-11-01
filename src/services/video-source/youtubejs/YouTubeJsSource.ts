@@ -3,6 +3,8 @@ import { Constants, Innertube, Platform, YTNodes, type Types, type YT } from 'yo
 import {
   StreamUnavailableError,
   type PlaybackSource,
+  type RelatedPage,
+  type WatchPage,
   type SearchPage,
   type StreamAttempt,
   type StreamResult,
@@ -13,6 +15,7 @@ import {
 } from '../types';
 import { applyClientOverrides } from './client-overrides';
 import { evaluatePlayerScript } from './evaluator';
+import { lockupToSummary, type LockupLike } from './lockup';
 import { planSource } from './select-source';
 
 type Client = Types.InnerTubeClient;
@@ -65,6 +68,15 @@ export class YouTubeJsSource implements VideoSource {
     const yt = await this.getInnertube();
     const result = await yt.search(query, { type: 'video' });
     return toSearchPage(result);
+  }
+
+  async getWatchPage(id: string): Promise<WatchPage> {
+    const yt = await this.getInnertube();
+    // Der WEB-Client liefert die vollständigen Seitendaten (Kanal, Beschreibung, Vorschläge).
+    // Die Streams dieses Clients werden hier nicht verwendet.
+    const info = await yt.getInfo(id, { client: 'WEB' });
+    const page = toRelatedPage(info);
+    return { details: toWatchDetails(id, info), related: page.items, moreRelated: page.more };
   }
 
   async getStreams(id: string): Promise<StreamResult> {
@@ -154,6 +166,62 @@ export class YouTubeJsSource implements VideoSource {
         return { reason: plan.reason };
     }
   }
+}
+
+function toRelatedPage(info: YT.VideoInfo): RelatedPage {
+  const items = (info.watch_next_feed ?? [])
+    .map((node) => {
+      if (node.is(YTNodes.LockupView)) return lockupToSummary(node as unknown as LockupLike);
+      if (node.is(YTNodes.CompactVideo)) return compactToSummary(node);
+      return undefined;
+    })
+    .filter((v): v is VideoSummary => v !== undefined);
+
+  return {
+    items,
+    more: info.wn_has_continuation
+      ? async () => toRelatedPage(await info.getWatchNextContinuation())
+      : undefined,
+  };
+}
+
+function compactToSummary(video: YTNodes.CompactVideo): VideoSummary {
+  return {
+    id: video.video_id,
+    title: video.title.toString(),
+    channel: { id: video.author.id, name: video.author.name, avatar: video.author.best_thumbnail },
+    durationSeconds: video.is_live ? undefined : video.duration?.seconds,
+    viewCountText: (video.short_view_count ?? video.view_count)?.toString(),
+    publishedText: video.published?.toString(),
+    thumbnails: toThumbnails(video.thumbnails),
+    isLive: video.is_live,
+  };
+}
+
+function toWatchDetails(id: string, info: YT.VideoInfo): VideoDetails {
+  const base = toVideoDetails(id, info);
+  const primary = info.primary_info;
+  const owner = info.secondary_info?.owner;
+  const description = info.secondary_info?.description?.toString();
+
+  return {
+    ...base,
+    title: primary?.title?.toString() || base.title,
+    channel: owner
+      ? {
+          id: owner.author.id,
+          name: owner.author.name,
+          avatar: owner.author.best_thumbnail,
+          subscriberCountText: owner.subscriber_count?.toString() || undefined,
+        }
+      : base.channel,
+    viewCountText:
+      (primary?.view_count?.short_view_count ?? primary?.view_count?.view_count)?.toString() ||
+      undefined,
+    publishedText: primary?.relative_date?.toString() || undefined,
+    dateText: primary?.published?.toString() || undefined,
+    description: description || base.description,
+  };
 }
 
 function clientHeaders(client: Client): Record<string, string> | undefined {
