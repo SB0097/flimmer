@@ -1,0 +1,18 @@
+# Erzwingt das Branch-Modell: nach main dürfen nur Pull Requests aus test.
+name: Branch-Regeln
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  only-from-test:
+    name: PR nach main nur aus test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Quell-Branch prüfen
+        run: |
+          if [ "${{ github.head_ref }}" != "test" ]; then
+            echo "::error::Pull Requests nach main bitte nur aus dem Branch 'test'. Features gehen zuerst nach 'test'."
+            exit 1
+          fi

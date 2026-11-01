@@ -1,0 +1,29 @@
+# Startet einen EAS Build – nur manuell über "Actions → EAS Build → Run workflow".
+# Die fertige APK erscheint auf expo.dev unter Projects → flimmer → Builds.
+name: EAS Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'Build-Profil (test = Flimmer Test, production = Flimmer, development = Dev-Client)'
+        type: choice
+        options: [test, production, development]
+        default: test
+
+jobs:
+  build:
+    name: Android (${{ inputs.profile }})
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - uses: expo/expo-github-action@v9
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+      - run: npm ci
+      - run: eas build --platform android --profile ${{ inputs.profile }} --non-interactive --no-wait
