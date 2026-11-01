@@ -49,7 +49,10 @@ export function lockupToSummary(lockup: LockupLike): VideoSummary | undefined {
     : badges.map((b) => parseDurationText(b.text)).find((d) => d !== undefined);
 
   const [channelRow = [], statsRow = []] = rowTexts(lockup);
-  const [viewCountText, publishedText] = statsRow;
+  const [rawViews, publishedText] = statsRow;
+  // YouTube liefert in Vorschlägen oft nur die Zahl („407.785“, „4 Mio.“)
+  const viewCountText =
+    rawViews && !/[A-Za-zÄÖÜäöü]{4,}/.test(rawViews) ? `${rawViews} Aufrufe` : rawViews;
   const avatar = lockup.metadata?.image?.avatar?.image?.[0];
 
   return {

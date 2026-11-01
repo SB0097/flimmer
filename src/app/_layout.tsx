@@ -15,7 +15,7 @@ export default function RootLayout() {
       <AnimatedSplashOverlay />
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="watch/[id]" options={{ title: '', headerTransparent: false }} />
+        <Stack.Screen name="watch/[id]" options={{ headerShown: false }} />
       </Stack>
     </ThemeProvider>
   );

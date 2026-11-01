@@ -1,30 +1,39 @@
 import { useEvent } from 'expo';
-import { useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { StatusBar } from 'expo-status-bar';
 import { useVideoPlayer, VideoView } from 'expo-video';
-import { useCallback, useEffect, useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
+import { VideoCard } from '@/components/video-card';
+import { VideoInfo } from '@/components/watch/video-info';
 import { Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
 import {
   StreamUnavailableError,
   videoSource,
+  type RelatedPage,
   type StreamAttempt,
   type StreamResult,
+  type VideoSummary,
+  type WatchPage,
 } from '@/services/video-source';
 
-type State =
+type StreamState =
   | { kind: 'loading' }
   | { kind: 'ready'; result: StreamResult }
   | { kind: 'error'; message: string; attempts: StreamAttempt[] };
 
 export default function WatchScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const theme = useTheme();
-  const [state, setState] = useState<State>({ kind: 'loading' });
-  const [showDetails, setShowDetails] = useState(false);
+  const [stream, setStream] = useState<StreamState>({ kind: 'loading' });
+  const [page, setPage] = useState<WatchPage>();
+  const [related, setRelated] = useState<VideoSummary[]>([]);
+  const moreRelated = useRef<RelatedPage['more']>(undefined);
+  const loadingMore = useRef(false);
+  const [attempt, setAttempt] = useState(0);
 
   const player = useVideoPlayer(null, (p) => {
     p.staysActiveInBackground = true;
@@ -34,16 +43,22 @@ export default function WatchScreen() {
     status: player.status,
   });
 
-  const [attempt, setAttempt] = useState(0);
+  // Beim Wechsel zu einem anderen Video (neue Seite im Stapel) dieses pausieren
+  useFocusEffect(
+    useCallback(() => {
+      return () => player.pause();
+    }, [player]),
+  );
 
+  // Stream und Seitendaten parallel laden
   useEffect(() => {
     let cancelled = false;
 
-    async function load() {
+    async function loadStream() {
       try {
         const result = await videoSource.getStreams(id);
         if (cancelled) return;
-        setState({ kind: 'ready', result });
+        setStream({ kind: 'ready', result });
         const { source, details } = result;
         await player.replaceAsync({
           uri: source.uri,
@@ -60,7 +75,7 @@ export default function WatchScreen() {
         if (!cancelled) player.play();
       } catch (e) {
         if (cancelled) return;
-        setState({
+        setStream({
           kind: 'error',
           message: e instanceof Error ? e.message : String(e),
           attempts: e instanceof StreamUnavailableError ? e.attempts : [],
@@ -68,102 +83,116 @@ export default function WatchScreen() {
       }
     }
 
-    load();
+    async function loadPage() {
+      try {
+        const result = await videoSource.getWatchPage(id);
+        if (cancelled) return;
+        setPage(result);
+        setRelated(result.related);
+        moreRelated.current = result.moreRelated;
+      } catch {
+        // Ohne Seitendaten bleibt der Player nutzbar; Basisdaten kommen aus dem Stream.
+      }
+    }
+
+    loadStream();
+    loadPage();
     return () => {
       cancelled = true;
     };
   }, [id, player, attempt]);
 
   const retry = useCallback(() => {
-    setState({ kind: 'loading' });
+    setStream({ kind: 'loading' });
     setAttempt((n) => n + 1);
   }, []);
 
-  const details = state.kind === 'ready' ? state.result.details : undefined;
+  const loadMore = useCallback(async () => {
+    if (!moreRelated.current || loadingMore.current) return;
+    loadingMore.current = true;
+    try {
+      const next = await moreRelated.current();
+      moreRelated.current = next.more;
+      setRelated((prev) => {
+        const seen = new Set(prev.map((v) => v.id));
+        return [...prev, ...next.items.filter((v) => !seen.has(v.id) && v.id !== id)];
+      });
+    } catch {
+      moreRelated.current = undefined;
+    } finally {
+      loadingMore.current = false;
+    }
+  }, [id]);
+
+  const details = page?.details ?? (stream.kind === 'ready' ? stream.result.details : undefined);
   const attempts =
-    state.kind === 'ready' ? state.result.attempts : state.kind === 'error' ? state.attempts : [];
+    stream.kind === 'ready'
+      ? stream.result.attempts
+      : stream.kind === 'error'
+        ? stream.attempts
+        : [];
+
+  const diagnostics = (
+    <View style={styles.diagnostics}>
+      <ThemedText type="code">Video-ID: {id}</ThemedText>
+      <ThemedText type="code">Quelle: {videoSource.name}</ThemedText>
+      {stream.kind === 'ready' ? (
+        <ThemedText type="code">
+          Stream: {stream.result.source.contentType} über {stream.result.source.via}
+        </ThemedText>
+      ) : null}
+      <ThemedText type="code">Player-Status: {status}</ThemedText>
+      {status === 'error' && playerError ? (
+        <ThemedText type="code">Player-Fehler: {playerError.message}</ThemedText>
+      ) : null}
+      {attempts.map((a, i) => (
+        <ThemedText key={i} type="code">
+          {a.ok ? '✓' : '✗'} {a.via}: {a.message}
+        </ThemedText>
+      ))}
+    </View>
+  );
 
   return (
     <ThemedView style={styles.container}>
-      <View style={styles.videoBox}>
-        {state.kind === 'ready' ? (
-          <VideoView
-            player={player}
-            style={StyleSheet.absoluteFill}
-            nativeControls
-            allowsPictureInPicture
-            contentFit="contain"
-          />
-        ) : null}
-        {state.kind === 'loading' || (state.kind === 'ready' && status === 'loading') ? (
-          <ActivityIndicator style={StyleSheet.absoluteFill} size="large" color="#fff" />
-        ) : null}
-        {state.kind === 'error' ? (
-          <View style={styles.errorBox}>
-            <ThemedText type="smallBold" style={styles.white}>
-              Video kann nicht abgespielt werden
-            </ThemedText>
-            <Pressable onPress={retry} style={styles.retry} accessibilityRole="button">
+      <StatusBar style="light" />
+      <SafeAreaView edges={['top']} style={styles.videoSafeArea}>
+        <View style={styles.videoBox}>
+          {stream.kind === 'ready' ? (
+            <VideoView
+              player={player}
+              style={StyleSheet.absoluteFill}
+              nativeControls
+              allowsPictureInPicture
+              contentFit="contain"
+            />
+          ) : null}
+          {stream.kind === 'loading' || (stream.kind === 'ready' && status === 'loading') ? (
+            <ActivityIndicator style={StyleSheet.absoluteFill} size="large" color="#fff" />
+          ) : null}
+          {stream.kind === 'error' ? (
+            <View style={styles.errorBox}>
               <ThemedText type="smallBold" style={styles.white}>
-                Erneut versuchen
+                Video kann nicht abgespielt werden
               </ThemedText>
-            </Pressable>
-          </View>
-        ) : null}
-      </View>
+              <Pressable onPress={retry} style={styles.retry} accessibilityRole="button">
+                <ThemedText type="smallBold" style={styles.white}>
+                  Erneut versuchen
+                </ThemedText>
+              </Pressable>
+            </View>
+          ) : null}
+        </View>
+      </SafeAreaView>
 
-      <ScrollView contentContainerStyle={styles.body}>
-        {details ? (
-          <>
-            <ThemedText style={styles.title}>{details.title}</ThemedText>
-            <ThemedText type="small" themeColor="textSecondary">
-              {[
-                details.channel.name,
-                details.viewCount !== undefined
-                  ? `${details.viewCount.toLocaleString('de-DE')} Aufrufe`
-                  : undefined,
-              ]
-                .filter(Boolean)
-                .join(' · ')}
-            </ThemedText>
-          </>
-        ) : null}
-
-        {state.kind === 'error' ? (
-          <ThemedText type="small" themeColor="textSecondary">
-            {state.message}
-          </ThemedText>
-        ) : null}
-        {status === 'error' && playerError ? (
-          <ThemedText type="small" themeColor="textSecondary">
-            Player-Fehler: {playerError.message}
-          </ThemedText>
-        ) : null}
-
-        <Pressable
-          onPress={() => setShowDetails((v) => !v)}
-          style={[styles.detailsToggle, { backgroundColor: theme.backgroundElement }]}
-          accessibilityRole="button">
-          <ThemedText type="smallBold">{showDetails ? '▾' : '▸'} Technische Details</ThemedText>
-        </Pressable>
-        {showDetails ? (
-          <View style={styles.details}>
-            <ThemedText type="code">Video-ID: {id}</ThemedText>
-            <ThemedText type="code">Quelle: {videoSource.name}</ThemedText>
-            {state.kind === 'ready' ? (
-              <ThemedText type="code">
-                Stream: {state.result.source.contentType} über {state.result.source.via}
-              </ThemedText>
-            ) : null}
-            <ThemedText type="code">Player-Status: {status}</ThemedText>
-            {attempts.map((a, i) => (
-              <ThemedText key={i} type="code">
-                {a.ok ? '✓' : '✗'} {a.via}: {a.message}
-              </ThemedText>
-            ))}
-          </View>
-        ) : null}
-      </ScrollView>
+      <FlatList
+        data={related}
+        keyExtractor={(v) => v.id}
+        renderItem={({ item }) => <VideoCard video={item} />}
+        ListHeaderComponent={<VideoInfo details={details} diagnostics={diagnostics} />}
+        onEndReached={loadMore}
+        onEndReachedThreshold={1.5}
+      />
     </ThemedView>
   );
 }
@@ -171,6 +200,9 @@ export default function WatchScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  videoSafeArea: {
+    backgroundColor: '#000',
   },
   videoBox: {
     width: '100%',
@@ -192,21 +224,7 @@ const styles = StyleSheet.create({
   white: {
     color: '#fff',
   },
-  body: {
-    padding: Spacing.three,
-    gap: Spacing.two,
-  },
-  title: {
-    fontSize: 18,
-    lineHeight: 24,
-    fontWeight: 600,
-  },
-  detailsToggle: {
-    marginTop: Spacing.three,
-    borderRadius: 8,
-    padding: Spacing.two,
-  },
-  details: {
+  diagnostics: {
     gap: Spacing.one,
   },
 });
