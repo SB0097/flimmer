@@ -16,6 +16,8 @@ export interface ChannelRef {
   id: string;
   name: string;
   avatar?: Thumbnail;
+  /** z. B. „15,8 Mio. Abonnenten“ */
+  subscriberCountText?: string;
 }
 
 export interface VideoSummary {
@@ -34,6 +36,21 @@ export interface VideoDetails extends VideoSummary {
   description: string;
   viewCount?: number;
   likeCount?: number;
+  /** Absolutes Datum, z. B. „Premiere am 31.12.2021“ */
+  dateText?: string;
+}
+
+/** Alles für die Player-Seite außer dem Stream selbst */
+export interface WatchPage {
+  details: VideoDetails;
+  related: VideoSummary[];
+  /** Weitere „Nächste Videos“ nachladen */
+  moreRelated?: () => Promise<RelatedPage>;
+}
+
+export interface RelatedPage {
+  items: VideoSummary[];
+  more?: () => Promise<RelatedPage>;
 }
 
 /** Abspielbare Quelle, direkt für expo-video verwendbar */
@@ -78,4 +95,5 @@ export interface VideoSource {
   readonly name: string;
   search(query: string): Promise<SearchPage>;
   getStreams(id: string): Promise<StreamResult>;
+  getWatchPage(id: string): Promise<WatchPage>;
 }
