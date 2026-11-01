@@ -12,15 +12,20 @@ import {
   type VideoSummary,
 } from '../types';
 import { evaluatePlayerScript } from './evaluator';
+import { planSource } from './select-source';
 
 type Client = Types.InnerTubeClient;
 
 /**
  * Reihenfolge der InnerTube-Clients beim Abrufen der Streams.
- * Mobile/VR-Clients liefern meist fertige URLs (oft ein HLS-Manifest) ohne
- * PoToken; der Web-Client ist der letzte Ausweg.
+ *
+ * Stand 11/2026 (getestet über einen deutschen Heimanschluss):
+ * - IOS: normale Videos mit unverschlüsselten Einzelformaten → selbst erzeugtes DASH.
+ *   Für Livestreams liefert IOS aber kein HLS-/DASH-Manifest.
+ * - ANDROID: liefert für Livestreams fertige HLS-/DASH-Manifeste.
+ * - VISIONOS, ANDROID_VR, TV: verlangen derzeit einen Login (Bot-Schutz), bleiben als Reserve.
  */
-export const DEFAULT_CLIENTS: Client[] = ['IOS', 'VISIONOS', 'ANDROID_VR', 'TV', 'WEB'];
+export const DEFAULT_CLIENTS: Client[] = ['IOS', 'ANDROID', 'VISIONOS', 'ANDROID_VR', 'TV', 'WEB'];
 
 export interface YouTubeJsOptions {
   clients?: Client[];
@@ -79,14 +84,14 @@ export class YouTubeJsSource implements VideoSource {
           continue;
         }
 
-        const source = await this.pickSource(yt, id, client, info);
-        if (!source) {
-          attempts.push({ via: client, ok: false, message: 'keine abspielbaren Formate' });
+        const picked = await this.pickSource(yt, id, client, info);
+        if ('reason' in picked) {
+          attempts.push({ via: client, ok: false, message: picked.reason });
           continue;
         }
 
-        attempts.push({ via: client, ok: true, message: `${source.contentType} gefunden` });
-        return { source, details, attempts };
+        attempts.push({ via: client, ok: true, message: picked.message });
+        return { source: picked.source, details, attempts };
       } catch (error) {
         attempts.push({ via: client, ok: false, message: errorMessage(error) });
       }
@@ -103,29 +108,48 @@ export class YouTubeJsSource implements VideoSource {
     id: string,
     client: Client,
     info: YT.VideoInfo,
-  ): Promise<PlaybackSource | undefined> {
+  ): Promise<{ source: PlaybackSource; message: string } | { reason: string }> {
     const data = info.streaming_data;
-    if (!data) return undefined;
+    if (!data) return { reason: 'keine Streaming-Daten' };
+
     const headers = clientHeaders(client);
+    const plan = planSource(data, {
+      isLive: Boolean(info.basic_info.is_live),
+      canGenerateDash: Boolean(this.options.saveDashManifest),
+    });
 
-    if (data.hls_manifest_url) {
-      return { uri: data.hls_manifest_url, contentType: 'hls', headers, via: client };
+    switch (plan.kind) {
+      case 'hls':
+        return {
+          source: { uri: plan.uri, contentType: 'hls', headers, via: client },
+          message: 'HLS-Manifest von YouTube',
+        };
+      case 'dash-server':
+        return {
+          source: { uri: plan.uri, contentType: 'dash', headers, via: client },
+          message: 'DASH-Manifest von YouTube',
+        };
+      case 'dash-generated': {
+        const xml = await info.toDash();
+        const uri = await this.options.saveDashManifest!(id, xml);
+        return {
+          source: { uri, contentType: 'dash', headers, via: client },
+          message: `DASH aus ${data.adaptive_formats.length} Formaten erzeugt`,
+        };
+      }
+      case 'progressive': {
+        const muxed = data.formats.filter((f) => f.has_audio && f.has_video);
+        const best = muxed.reduce((a, b) => ((b.height ?? 0) > (a.height ?? 0) ? b : a));
+        const uri = await best.decipher(yt.session.player);
+        if (!uri) return { reason: 'kombiniertes Format ohne Adresse' };
+        return {
+          source: { uri, contentType: 'progressive', headers, via: client },
+          message: `kombiniertes Format ${best.quality_label ?? ''}`.trim(),
+        };
+      }
+      case 'none':
+        return { reason: plan.reason };
     }
-
-    if (data.adaptive_formats.length > 0 && this.options.saveDashManifest) {
-      const xml = await info.toDash();
-      const uri = await this.options.saveDashManifest(id, xml);
-      return { uri, contentType: 'dash', headers, via: client };
-    }
-
-    const muxed = data.formats.filter((f) => f.has_audio && f.has_video);
-    if (muxed.length > 0) {
-      const best = muxed.reduce((a, b) => ((b.height ?? 0) > (a.height ?? 0) ? b : a));
-      const uri = await best.decipher(yt.session.player);
-      if (uri) return { uri, contentType: 'progressive', headers, via: client };
-    }
-
-    return undefined;
   }
 }
 
