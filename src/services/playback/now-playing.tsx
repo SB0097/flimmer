@@ -11,7 +11,7 @@ import {
 } from 'react';
 
 import type { Segment } from '@/lib/segments';
-import { sleepStep } from '@/lib/sleep-timer';
+import { sleepRemainingMs, sleepStep, type SleepTimer } from '@/lib/sleep-timer';
 import { applyPlaybackSettings } from '@/services/playback/background';
 import {
   playSource,
@@ -53,10 +53,10 @@ export interface NowPlaying {
   chooseQuality(height: number | undefined): Promise<void>;
   /** Wiedergabe beenden (Mini-Player schließen) */
   close(): void;
-  /** Zeitpunkt (ms), zu dem der Sleep-Timer pausiert; undefined = aus */
-  sleepEndsAt?: number;
-  /** Sleep-Timer in Minuten stellen; undefined = aus */
-  setSleepTimer(minutes: number | undefined): void;
+  /** Eingestellter Sleep-Timer; undefined = aus */
+  sleepTimer?: SleepTimer;
+  /** Sleep-Timer stellen: Minuten, 'endOfVideo' (Ende des aktuellen Videos) oder undefined = aus */
+  setSleepTimer(choice: number | 'endOfVideo' | undefined): void;
 }
 
 const NowPlayingContext = createContext<NowPlaying | null>(null);
@@ -76,7 +76,7 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
   const [qualities, setQualities] = useState<QualityInfo>();
   const [quality, setQuality] = useState<number>();
 
-  const [sleepEndsAt, setSleepEndsAt] = useState<number>();
+  const [sleepTimer, setSleepTimerState] = useState<SleepTimer>();
   const currentId = useRef<string | undefined>(undefined);
   const positions = useRef(new Map<string, number>());
 
@@ -107,9 +107,11 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
       rememberPosition();
       currentId.current = id;
       reset();
+      setPlayerVolume(player, 1);
+      setSleepTimerState((t) => (t?.kind === 'endOfVideo' ? undefined : t));
       setVideoId(id);
     },
-    [rememberPosition, reset],
+    [player, rememberPosition, reset],
   );
 
   const close = useCallback(() => {
@@ -121,37 +123,62 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
   }, [player, rememberPosition, reset]);
 
   const setSleepTimer = useCallback(
-    (minutes: number | undefined) => {
+    (choice: number | 'endOfVideo' | undefined) => {
       setPlayerVolume(player, 1);
-      setSleepEndsAt(minutes ? Date.now() + minutes * 60_000 : undefined);
+      if (choice === 'endOfVideo') {
+        setSleepTimerState(
+          currentId.current ? { kind: 'endOfVideo', videoId: currentId.current } : undefined,
+        );
+      } else {
+        setSleepTimerState(
+          choice ? { kind: 'time', endsAt: Date.now() + choice * 60_000 } : undefined,
+        );
+      }
     },
     [player],
   );
 
+  // „Ende des Videos“ gilt nur für das Video, bei dem er gestellt wurde
+  const activeSleep =
+    sleepTimer?.kind === 'endOfVideo' && sleepTimer.videoId !== videoId ? undefined : sleepTimer;
+
   // Sleep-Timer: über die Player-Events prüfen (JS-Timer laufen im Hintergrund nicht)
   useEffect(() => {
-    if (sleepEndsAt === undefined) return;
+    const sleepTimer = activeSleep;
+    if (!sleepTimer) return;
+    const finish = () => {
+      player.pause();
+      setPlayerVolume(player, 1);
+      setSleepTimerState(undefined);
+    };
     const progress = player.addListener('timeUpdate', () => {
-      const step = sleepStep(sleepEndsAt - Date.now());
+      const remaining = sleepRemainingMs(
+        sleepTimer,
+        Date.now(),
+        player.currentTime,
+        player.duration,
+      );
+      if (remaining === undefined) return;
+      const step = sleepStep(remaining);
       if (step.action === 'fade') setPlayerVolume(player, step.volume);
-      if (step.action === 'stop') {
-        player.pause();
-        setPlayerVolume(player, 1);
-        setSleepEndsAt(undefined);
-      }
+      if (step.action === 'stop') finish();
     });
-    // Abgelaufen, während pausiert war → beim Weiterspielen nicht sofort wieder stoppen
+    const ended = player.addListener('playToEnd', () => {
+      if (sleepTimer.kind === 'endOfVideo') finish();
+    });
+    // Zeit abgelaufen, während pausiert war → beim Weiterspielen nicht sofort wieder stoppen
     const playing = player.addListener('playingChange', ({ isPlaying }) => {
-      if (isPlaying && Date.now() >= sleepEndsAt) {
+      if (isPlaying && sleepTimer.kind === 'time' && Date.now() >= sleepTimer.endsAt) {
         setPlayerVolume(player, 1);
-        setSleepEndsAt(undefined);
+        setSleepTimerState(undefined);
       }
     });
     return () => {
       progress.remove();
+      ended.remove();
       playing.remove();
     };
-  }, [player, sleepEndsAt]);
+  }, [player, activeSleep]);
 
   const retry = useCallback(() => {
     setStream({ kind: 'loading' });
@@ -219,7 +246,7 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
       retry,
       chooseQuality,
       close,
-      sleepEndsAt,
+      sleepTimer: activeSleep,
       setSleepTimer,
     }),
     [
@@ -234,7 +261,7 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
       retry,
       chooseQuality,
       close,
-      sleepEndsAt,
+      activeSleep,
       setSleepTimer,
     ],
   );

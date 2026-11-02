@@ -22,3 +22,18 @@ export function remainingLabel(remainingMs: number): string {
   if (seconds < 60) return `noch ${seconds} Sek.`;
   return `noch ${Math.ceil(seconds / 60)} Min.`;
 }
+
+/** Eingestellter Sleep-Timer: feste Zeit oder bis zum Ende des aktuellen Videos */
+export type SleepTimer = { kind: 'time'; endsAt: number } | { kind: 'endOfVideo'; videoId: string };
+
+/** Restzeit in ms bis zum Pausieren; undefined, wenn (noch) nicht bestimmbar (z. B. Livestream) */
+export function sleepRemainingMs(
+  timer: SleepTimer,
+  now: number,
+  currentTime: number,
+  duration: number,
+): number | undefined {
+  if (timer.kind === 'time') return timer.endsAt - now;
+  if (!(duration > 0) || !Number.isFinite(duration)) return undefined;
+  return (duration - currentTime) * 1000;
+}

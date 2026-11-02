@@ -7,7 +7,7 @@ import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import type { QualityOption } from '@/lib/hls';
-import { remainingLabel, SLEEP_OPTIONS } from '@/lib/sleep-timer';
+import { remainingLabel, SLEEP_OPTIONS, type SleepTimer } from '@/lib/sleep-timer';
 
 interface Props {
   visible: boolean;
@@ -19,8 +19,10 @@ interface Props {
   /** Tatsächlich gespielte Höhe im Auto-Modus, z. B. 720 */
   autoHeight?: number;
   onSelectQuality: (height: number | undefined) => void;
-  sleepEndsAt?: number;
-  onSetSleepTimer: (minutes: number | undefined) => void;
+  sleepTimer?: SleepTimer;
+  onSetSleepTimer: (choice: number | 'endOfVideo' | undefined) => void;
+  /** Bei Livestreams gibt es kein „Ende des Videos“ */
+  isLive?: boolean;
 }
 
 type Page = 'main' | 'quality' | 'sleep';
@@ -33,12 +35,13 @@ export function PlayerMenu({
   quality,
   autoHeight,
   onSelectQuality,
-  sleepEndsAt,
+  sleepTimer,
   onSetSleepTimer,
+  isLive = false,
 }: Props) {
   const theme = useTheme();
   const [page, setPage] = useState<Page>('main');
-  const now = useNow(visible && sleepEndsAt !== undefined);
+  const now = useNow(visible && sleepTimer?.kind === 'time');
 
   const close = () => {
     setPage('main');
@@ -51,7 +54,11 @@ export function PlayerMenu({
       : autoHeight
         ? `Auto (${autoHeight}p)`
         : 'Auto';
-  const sleepText = sleepEndsAt ? remainingLabel(sleepEndsAt - now) : 'Aus';
+  const sleepText = !sleepTimer
+    ? 'Aus'
+    : sleepTimer.kind === 'endOfVideo'
+      ? 'Ende des Videos'
+      : remainingLabel(sleepTimer.endsAt - now);
 
   const option = (
     key: string,
@@ -130,17 +137,23 @@ export function PlayerMenu({
         {page === 'sleep' ? (
           <>
             <SubTitle title="Sleep-Timer" onBack={() => setPage('main')} />
-            {option('off', 'Aus', !sleepEndsAt, () => {
+            {option('off', 'Aus', !sleepTimer, () => {
               onSetSleepTimer(undefined);
               close();
             })}
+            {!isLive
+              ? option('end', 'Ende des Videos', sleepTimer?.kind === 'endOfVideo', () => {
+                  onSetSleepTimer('endOfVideo');
+                  close();
+                })
+              : null}
             {SLEEP_OPTIONS.map((minutes) =>
               option(String(minutes), `${minutes} Minuten`, false, () => {
                 onSetSleepTimer(minutes);
                 close();
               }),
             )}
-            {sleepEndsAt ? (
+            {sleepTimer ? (
               <ThemedText type="small" themeColor="textSecondary" style={styles.note}>
                 Läuft – {sleepText}. Danach wird der Ton ausgeblendet und pausiert.
               </ThemedText>

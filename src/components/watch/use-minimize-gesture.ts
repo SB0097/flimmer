@@ -6,6 +6,8 @@ import type { Frame } from '@/services/playback/mini-frame';
 /** Ab diesem Fortschritt (0–1) oder dieser Geschwindigkeit (px/ms) wird minimiert */
 const DONE_PROGRESS = 0.35;
 const DONE_VELOCITY = 0.9;
+/** Weg (px) beim Hochwischen, nach dem das Video maximal angehoben ist */
+const LIFT_DISTANCE = 140;
 
 interface Options {
   isFullscreen: boolean;
@@ -44,7 +46,7 @@ export function useMinimizeGesture(options: Options) {
 
   // eslint-disable-next-line react-hooks/refs -- Handler lesen die Refs erst beim Ziehen, nicht beim Rendern
   const [controller] = useState(() => {
-    const { progress, dx, dy, scaleDelta } = anim;
+    const { progress, dx, dy, scaleDelta, lift } = anim;
     let distance = 1;
 
     /** Weg vom aktuellen Video-Platz zum Mini-Fenster festlegen */
@@ -85,12 +87,15 @@ export function useMinimizeGesture(options: Options) {
     };
 
     const springBack = () =>
-      Animated.spring(progress, {
-        toValue: 0,
-        damping: 20,
-        stiffness: 220,
-        useNativeDriver: true,
-      }).start();
+      Animated.parallel([
+        Animated.spring(progress, {
+          toValue: 0,
+          damping: 20,
+          stiffness: 220,
+          useNativeDriver: true,
+        }),
+        Animated.spring(lift, { toValue: 0, damping: 18, stiffness: 240, useNativeDriver: true }),
+      ]).start();
 
     const responder = PanResponder.create({
       // Deutlich senkrecht: nach unten immer, nach oben nur im Hochformat (→ Vollbild)
@@ -104,6 +109,13 @@ export function useMinimizeGesture(options: Options) {
       },
       onPanResponderMove: (_, g) => {
         if (latest.current.isFullscreen) return;
+        if (g.dy < 0) {
+          // Hochwischen: Video folgt dem Finger ein Stück und wird etwas größer
+          lift.setValue(Math.min(1, -g.dy / LIFT_DISTANCE));
+          progress.setValue(0);
+          return;
+        }
+        lift.setValue(0);
         progress.setValue(Math.min(1, Math.max(0, g.dy / distance)));
       },
       onPanResponderRelease: (_, g) => {
@@ -113,6 +125,7 @@ export function useMinimizeGesture(options: Options) {
         }
         if (g.dy < 0) {
           if (g.dy < -60 || g.vy < -DONE_VELOCITY) latest.current.onEnterFullscreen();
+          springBack();
           return;
         }
         if (g.dy / distance > DONE_PROGRESS || g.vy > DONE_VELOCITY) minimize();
@@ -142,17 +155,23 @@ function createAnimation(startMinimized: boolean) {
   const dx = new Animated.Value(0);
   const dy = new Animated.Value(0);
   const scaleDelta = new Animated.Value(startMinimized ? -1 : 0);
+  /** 0–1 beim Hochwischen (Richtung Vollbild) */
+  const lift = new Animated.Value(0);
   return {
     progress,
     dx,
     dy,
     scaleDelta,
+    lift,
     /** Für das Video: schrumpft und wandert Richtung Mini-Player */
     videoStyle: {
       transform: [
         { translateX: Animated.multiply(progress, dx) },
         { translateY: Animated.multiply(progress, dy) },
         { scale: Animated.add(1, Animated.multiply(progress, scaleDelta)) },
+        // Hochwischen: bis zu 28 px nach oben und 8 % größer
+        { translateY: Animated.multiply(lift, -28) },
+        { scale: Animated.add(1, Animated.multiply(lift, 0.08)) },
       ],
     },
     /** Für Titel, Kommentare, Liste: blendet schnell aus */
