@@ -1,8 +1,8 @@
 import { useEvent } from 'expo';
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type ComponentRef } from 'react';
 import {
   ActivityIndicator,
   Animated,
@@ -13,7 +13,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PlayerVideo } from '@/components/player-video';
 import { ThemedText } from '@/components/themed-text';
@@ -27,6 +27,7 @@ import { useMinimizeGesture } from '@/components/watch/use-minimize-gesture';
 import { VideoInfo } from '@/components/watch/video-info';
 import { Spacing } from '@/constants/theme';
 import { friendlyStreamError } from '@/lib/friendly-error';
+import { getMiniPlayerFrame, type Frame } from '@/services/playback/mini-frame';
 import { useNowPlaying, type StreamState } from '@/services/playback/now-playing';
 import {
   videoSource,
@@ -140,15 +141,47 @@ export default function WatchScreen() {
     ).catch(() => {});
   }, []);
 
-  // Runterziehen → Mini-Player (alle Video-Seiten schließen, zurück zu den Tabs)
+  // Runterziehen → Video schrumpft in den Mini-Player. Danach alle Video-Seiten
+  // ohne weitere Animation schließen (das Video sitzt schon an Ort und Stelle).
+  const navigation = useNavigation();
   const minimize = useCallback(() => {
-    if (router.canDismiss()) router.dismissAll();
+    navigation.setOptions({ animation: 'none' });
+    const routes = navigation.getState()?.routes ?? [];
+    let count = 0;
+    for (let i = routes.length - 1; i >= 0 && routes[i].name === 'watch/[id]'; i--) count++;
+    if (count > 0 && router.canDismiss()) router.dismiss(count);
     else router.replace('/');
+  }, [navigation]);
+
+  // Position des Videos auf dem Bildschirm (Start der Schrumpf-Animation)
+  const videoRef = useRef<ComponentRef<typeof View>>(null);
+  const videoFrame = useRef<Frame | undefined>(undefined);
+  const measureVideo = useCallback(() => {
+    videoRef.current?.measureInWindow((x, y, width, height) => {
+      videoFrame.current = { x, y, width, height };
+    });
   }, []);
-  const { height: screenHeight } = useWindowDimensions();
+  const { width: screenWidth, height: screenHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
   const swipe = useMinimizeGesture({
     isFullscreen,
-    screenHeight,
+    getFrames: () => {
+      // Noch nie einen Mini-Player gemessen → übliche Position über der Tab-Leiste schätzen
+      const height = 64;
+      const target = getMiniPlayerFrame() ?? {
+        x: 0,
+        y: screenHeight - insets.bottom - 80 - height,
+        width: (height * 16) / 9,
+        height,
+      };
+      const video = videoFrame.current ?? {
+        x: 0,
+        y: insets.top,
+        width: screenWidth,
+        height: (screenWidth * 9) / 16,
+      };
+      return { video, target };
+    },
     onMinimize: minimize,
     onExitFullscreen: () => setFullscreen(false),
   });
@@ -176,6 +209,9 @@ export default function WatchScreen() {
       : stream.kind === 'ready' && status === 'error'
         ? friendlyStreamError(playerError?.message ?? playerError)
         : undefined;
+
+  const isLoading =
+    !failure && (stream.kind === 'loading' || (stream.kind === 'ready' && status === 'loading'));
 
   const qualityLabel =
     quality !== undefined
@@ -218,14 +254,24 @@ export default function WatchScreen() {
   );
 
   return (
-    <Animated.View style={[styles.container, swipe.style]}>
-      <ThemedView style={[styles.container, isFullscreen && styles.fullscreenContainer]}>
-        <StatusBar style="light" hidden={isFullscreen} />
-        <View {...swipe.panHandlers}>
-          <SafeAreaView
-            edges={isFullscreen ? [] : ['top']}
-            style={[styles.videoSafeArea, isFullscreen && styles.flex]}>
-            <View style={isFullscreen ? styles.videoFullscreen : styles.videoBox}>
+    <View style={[styles.container, isFullscreen && styles.fullscreenContainer]}>
+      {/* Hintergrund extra, damit er beim Runterziehen ausblenden kann (App darunter wird sichtbar) */}
+      {!isFullscreen ? (
+        <Animated.View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, { opacity: swipe.backgroundOpacity }]}>
+          <View style={[styles.statusBand, { height: insets.top }]} />
+          <ThemedView style={styles.flex} />
+        </Animated.View>
+      ) : null}
+      <StatusBar style="light" hidden={isFullscreen} />
+      <View {...swipe.panHandlers} style={isFullscreen && styles.flex}>
+        <SafeAreaView edges={isFullscreen ? [] : ['top']} style={isFullscreen && styles.flex}>
+          <Animated.View style={isFullscreen ? styles.flex : swipe.videoStyle}>
+            <View
+              ref={videoRef}
+              onLayout={measureVideo}
+              style={isFullscreen ? styles.videoFullscreen : styles.videoBox}>
               {stream.kind === 'ready' ? (
                 <>
                   <PlayerVideo style={StyleSheet.absoluteFill} />
@@ -238,6 +284,7 @@ export default function WatchScreen() {
                       onOpenSettings={() => setShowQuality(true)}
                       qualityLabel={qualities ? qualityLabel : undefined}
                       segments={segments}
+                      isLoading={isLoading}
                     />
                   ) : null}
                   {!failure && segments.length > 0 ? (
@@ -245,8 +292,7 @@ export default function WatchScreen() {
                   ) : null}
                 </>
               ) : null}
-              {!failure &&
-              (stream.kind === 'loading' || (stream.kind === 'ready' && status === 'loading')) ? (
+              {isLoading ? (
                 <ActivityIndicator
                   style={StyleSheet.absoluteFill}
                   size="large"
@@ -274,48 +320,48 @@ export default function WatchScreen() {
                 </View>
               ) : null}
             </View>
-          </SafeAreaView>
-        </View>
+          </Animated.View>
+        </SafeAreaView>
+      </View>
 
-        {!isFullscreen ? (
-          <View style={styles.flex}>
-            <FlatList
-              data={related}
-              keyExtractor={(v) => v.id}
-              renderItem={({ item }) => <VideoCard video={item} />}
-              ListHeaderComponent={
-                <VideoInfo
-                  details={details}
-                  comments={comments}
-                  onOpenComments={() => setShowComments(true)}
-                  diagnostics={diagnostics}
-                />
-              }
-              onEndReached={loadMore}
-              onEndReachedThreshold={1.5}
-            />
-            {showComments ? (
-              <CommentsPanel
-                videoId={id}
-                initial={comments ?? undefined}
-                onClose={() => setShowComments(false)}
+      {!isFullscreen ? (
+        <Animated.View style={[styles.flex, { opacity: swipe.contentOpacity }]}>
+          <FlatList
+            data={related}
+            keyExtractor={(v) => v.id}
+            renderItem={({ item }) => <VideoCard video={item} />}
+            ListHeaderComponent={
+              <VideoInfo
+                details={details}
+                comments={comments}
+                onOpenComments={() => setShowComments(true)}
+                diagnostics={diagnostics}
               />
-            ) : null}
-          </View>
-        ) : null}
+            }
+            onEndReached={loadMore}
+            onEndReachedThreshold={1.5}
+          />
+          {showComments ? (
+            <CommentsPanel
+              videoId={id}
+              initial={comments ?? undefined}
+              onClose={() => setShowComments(false)}
+            />
+          ) : null}
+        </Animated.View>
+      ) : null}
 
-        <PlayerMenu
-          visible={showQuality}
-          onClose={() => setShowQuality(false)}
-          qualityOptions={qualities?.options ?? []}
-          quality={quality}
-          autoHeight={quality === undefined ? videoTrack?.size?.height : undefined}
-          onSelectQuality={chooseQuality}
-          sleepEndsAt={nowPlaying.sleepEndsAt}
-          onSetSleepTimer={nowPlaying.setSleepTimer}
-        />
-      </ThemedView>
-    </Animated.View>
+      <PlayerMenu
+        visible={showQuality}
+        onClose={() => setShowQuality(false)}
+        qualityOptions={qualities?.options ?? []}
+        quality={quality}
+        autoHeight={quality === undefined ? videoTrack?.size?.height : undefined}
+        onSelectQuality={chooseQuality}
+        sleepEndsAt={nowPlaying.sleepEndsAt}
+        onSetSleepTimer={nowPlaying.setSleepTimer}
+      />
+    </View>
   );
 }
 
@@ -329,7 +375,7 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
-  videoSafeArea: {
+  statusBand: {
     backgroundColor: '#000',
   },
   videoBox: {
