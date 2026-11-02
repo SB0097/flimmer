@@ -3,7 +3,7 @@
     "name": "Flimmer",
     "slug": "flimmer",
     "version": "0.0.1",
-    "orientation": "default",
+    "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "flimmer",
     "userInterfaceStyle": "automatic",
