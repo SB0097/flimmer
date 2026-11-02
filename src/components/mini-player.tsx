@@ -2,7 +2,7 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useEvent } from 'expo';
 import { Image } from 'expo-image';
 import { router, useIsFocused } from 'expo-router';
-import { useRef, type ComponentRef } from 'react';
+import { useEffect, useRef, type ComponentRef } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { PlayerVideo } from '@/components/player-video';
@@ -27,6 +27,21 @@ export function MiniPlayer() {
   const { width: screenWidth } = useWindowDimensions();
   const cardRef = useRef<ComponentRef<typeof View>>(null);
   const { player, videoId, stream, details, close } = useNowPlaying();
+
+  // Position nur merken, solange das Fenster sichtbar ist: Liegt die Video-Seite
+  // darüber, ordnet sich die Seite darunter anders an – das wäre das falsche Ziel.
+  const measure = () => {
+    if (!focused) return;
+    cardRef.current?.measureInWindow((x, y, w, h) =>
+      setMiniPlayerFrame({ x, y, width: w, height: h }),
+    );
+  };
+  useEffect(() => {
+    if (!focused || !videoId) return;
+    cardRef.current?.measureInWindow((x, y, w, h) =>
+      setMiniPlayerFrame({ x, y, width: w, height: h }),
+    );
+  }, [focused, videoId]);
   const { isPlaying } = useEvent(player, 'playingChange', { isPlaying: player.playing });
   const { currentTime } = useEvent(player, 'timeUpdate', {
     currentTime: player.currentTime,
@@ -52,11 +67,7 @@ export function MiniPlayer() {
       // sonst ein zweites Bild. Gemessen wird trotzdem (Ziel der Animation).
       style={[styles.card, { width, height }, !focused && styles.hidden]}
       pointerEvents={focused ? 'auto' : 'none'}
-      onLayout={() =>
-        cardRef.current?.measureInWindow((x, y, w, h) =>
-          setMiniPlayerFrame({ x, y, width: w, height: h }),
-        )
-      }>
+      onLayout={measure}>
       {/* Das Videobild darf nur an einer Stelle hängen: auf der sichtbaren Seite */}
       {focused && stream.kind === 'ready' ? (
         <PlayerVideo style={StyleSheet.absoluteFill} />
@@ -66,7 +77,9 @@ export function MiniPlayer() {
 
       <Pressable
         style={StyleSheet.absoluteFill}
-        onPress={() => router.push({ pathname: '/watch/[id]', params: { id: videoId } })}
+        onPress={() =>
+          router.push({ pathname: '/watch/[id]', params: { id: videoId, from: 'mini' } })
+        }
         accessibilityRole="button"
         accessibilityLabel={`Video öffnen: ${title}`}
       />

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Animated, PanResponder } from 'react-native';
+import { Animated, Easing, PanResponder } from 'react-native';
 
 import type { Frame } from '@/services/playback/mini-frame';
 
@@ -13,6 +13,10 @@ interface Options {
   getFrames: () => { video?: Frame; target: Frame };
   onMinimize: () => void;
   onExitFullscreen: () => void;
+  /** Nach oben wischen im Hochformat → Vollbild (wie YouTube) */
+  onEnterFullscreen: () => void;
+  /** Seite startet „im Mini-Player“ (unsichtbar klein) und wächst per expandFromMini heraus */
+  startMinimized?: boolean;
 }
 
 /** Wie weit und wie stark das Video schrumpfen muss, um genau auf dem Mini-Player zu landen */
@@ -32,73 +36,112 @@ export function minimizeTransform(video: Frame, target: Frame) {
  * deutlich senkrechten Bewegung ein, Tippen und seitliches Spulen bleiben frei.
  */
 export function useMinimizeGesture(options: Options) {
-  const [anim] = useState(createAnimation);
-  const { progress, dx, dy, scaleDelta } = anim;
-  const distance = useRef(1);
+  const [anim] = useState(() => createAnimation(options.startMinimized ?? false));
   const latest = useRef(options);
   useEffect(() => {
     latest.current = options;
   });
 
   // eslint-disable-next-line react-hooks/refs -- Handler lesen die Refs erst beim Ziehen, nicht beim Rendern
-  const [responder] = useState(() =>
-    PanResponder.create({
-      onMoveShouldSetPanResponderCapture: (_, g) => g.dy > 12 && g.dy > Math.abs(g.dx) * 1.5,
+  const [controller] = useState(() => {
+    const { progress, dx, dy, scaleDelta } = anim;
+    let distance = 1;
+
+    /** Weg vom aktuellen Video-Platz zum Mini-Fenster festlegen */
+    const aim = () => {
+      const { video, target } = latest.current.getFrames();
+      if (!video) return false;
+      const t = minimizeTransform(video, target);
+      dx.setValue(t.dx);
+      dy.setValue(t.dy);
+      scaleDelta.setValue(t.scale - 1);
+      distance = Math.max(1, t.dy);
+      return true;
+    };
+
+    /** Video in den Mini-Player schrumpfen lassen, danach die Seite schließen */
+    const minimize = () => {
+      aim();
+      Animated.timing(progress, {
+        toValue: 1,
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (finished) latest.current.onMinimize();
+      });
+    };
+
+    /** Beim Öffnen aus dem Mini-Player: Video wächst aus dem Fenster heraus */
+    const expandFromMini = () => {
+      if (!aim()) return;
+      progress.setValue(1);
+      Animated.timing(progress, {
+        toValue: 0,
+        duration: 300,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+    };
+
+    const springBack = () =>
+      Animated.spring(progress, {
+        toValue: 0,
+        damping: 20,
+        stiffness: 220,
+        useNativeDriver: true,
+      }).start();
+
+    const responder = PanResponder.create({
+      // Deutlich senkrecht: nach unten immer, nach oben nur im Hochformat (→ Vollbild)
+      onMoveShouldSetPanResponderCapture: (_, g) =>
+        Math.abs(g.dy) > 12 &&
+        Math.abs(g.dy) > Math.abs(g.dx) * 1.5 &&
+        (g.dy > 0 || !latest.current.isFullscreen),
       onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: () => {
-        if (latest.current.isFullscreen) return;
-        const { video, target } = latest.current.getFrames();
-        if (!video) return;
-        const t = minimizeTransform(video, target);
-        dx.setValue(t.dx);
-        dy.setValue(t.dy);
-        scaleDelta.setValue(t.scale - 1);
-        distance.current = Math.max(1, t.dy);
+        if (!latest.current.isFullscreen) aim();
       },
       onPanResponderMove: (_, g) => {
         if (latest.current.isFullscreen) return;
-        progress.setValue(Math.min(1, Math.max(0, g.dy / distance.current)));
+        progress.setValue(Math.min(1, Math.max(0, g.dy / distance)));
       },
       onPanResponderRelease: (_, g) => {
-        const { isFullscreen, onMinimize, onExitFullscreen } = latest.current;
-        if (isFullscreen) {
-          if (g.dy > 120 || g.vy > DONE_VELOCITY) onExitFullscreen();
+        if (latest.current.isFullscreen) {
+          if (g.dy > 120 || g.vy > DONE_VELOCITY) latest.current.onExitFullscreen();
           return;
         }
-        const done = g.dy / distance.current > DONE_PROGRESS || g.vy > DONE_VELOCITY;
-        if (done) {
-          Animated.timing(progress, { toValue: 1, duration: 200, useNativeDriver: true }).start(
-            () => onMinimize(),
-          );
-        } else {
-          Animated.spring(progress, {
-            toValue: 0,
-            damping: 20,
-            stiffness: 220,
-            useNativeDriver: true,
-          }).start();
+        if (g.dy < 0) {
+          if (g.dy < -60 || g.vy < -DONE_VELOCITY) latest.current.onEnterFullscreen();
+          return;
         }
+        if (g.dy / distance > DONE_PROGRESS || g.vy > DONE_VELOCITY) minimize();
+        else springBack();
       },
-      onPanResponderTerminate: () => {
-        Animated.spring(progress, { toValue: 0, useNativeDriver: true }).start();
-      },
-    }),
-  );
+      onPanResponderTerminate: springBack,
+    });
+
+    return { panHandlers: responder.panHandlers, minimize, expandFromMini };
+  });
 
   return {
-    panHandlers: responder.panHandlers,
+    panHandlers: controller.panHandlers,
+    minimize: controller.minimize,
+    expandFromMini: controller.expandFromMini,
     videoStyle: anim.videoStyle,
     contentOpacity: anim.contentOpacity,
     backgroundOpacity: anim.backgroundOpacity,
+    navOpacity: anim.navOpacity,
   };
 }
 
 /** Animierte Werte einmalig anlegen (bleiben über alle Renders gleich) */
-function createAnimation() {
-  const progress = new Animated.Value(0);
+function createAnimation(startMinimized: boolean) {
+  // Startet die Seite im Mini-Player, ist das Video bis zum Wachsen unsichtbar (Skalierung 0)
+  const progress = new Animated.Value(startMinimized ? 1 : 0);
   const dx = new Animated.Value(0);
   const dy = new Animated.Value(0);
-  const scaleDelta = new Animated.Value(0);
+  const scaleDelta = new Animated.Value(startMinimized ? -1 : 0);
   return {
     progress,
     dx,
@@ -115,6 +158,12 @@ function createAnimation() {
     /** Für Titel, Kommentare, Liste: blendet schnell aus */
     contentOpacity: progress.interpolate({
       inputRange: [0, 0.4],
+      outputRange: [1, 0],
+      extrapolate: 'clamp',
+    }),
+    /** Für den Bereich über der Tab-Leiste: wird früh durchsichtig, damit die Leiste schon beim Ziehen da ist */
+    navOpacity: progress.interpolate({
+      inputRange: [0, 0.3],
       outputRange: [1, 0],
       extrapolate: 'clamp',
     }),
