@@ -20,10 +20,13 @@ import { VideoCard } from '@/components/video-card';
 import { CommentsPanel } from '@/components/watch/comments-panel';
 import { PlayerControls } from '@/components/watch/player-controls';
 import { QualitySheet } from '@/components/watch/quality-sheet';
+import { SponsorOverlay } from '@/components/watch/sponsor-overlay';
 import { VideoInfo } from '@/components/watch/video-info';
 import { Spacing } from '@/constants/theme';
 import { friendlyStreamError } from '@/lib/friendly-error';
+import type { Segment } from '@/lib/segments';
 import { loadQualities, sourceForQuality, type QualityInfo } from '@/services/playback/quality';
+import { fetchSegments } from '@/services/sponsorblock/sponsorblock';
 import {
   StreamUnavailableError,
   videoSource,
@@ -78,6 +81,7 @@ export default function WatchScreen() {
   const [quality, setQuality] = useState<number>();
   const [showQuality, setShowQuality] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [segments, setSegments] = useState<Segment[]>([]);
 
   const player = useVideoPlayer(null, (p) => {
     p.staysActiveInBackground = true;
@@ -144,9 +148,19 @@ export default function WatchScreen() {
       }
     }
 
+    async function loadSegments() {
+      try {
+        const result = await fetchSegments(id);
+        if (!cancelled) setSegments(result);
+      } catch {
+        if (!cancelled) setSegments([]);
+      }
+    }
+
     loadStream();
     loadPage();
     loadComments();
+    loadSegments();
     return () => {
       cancelled = true;
     };
@@ -239,6 +253,7 @@ export default function WatchScreen() {
         </ThemedText>
       ) : null}
       <ThemedText type="code">Player-Status: {status}</ThemedText>
+      <ThemedText type="code">SponsorBlock: {segments.length} Segmente</ThemedText>
       {videoTrack?.size ? (
         <ThemedText type="code">
           Spur: {videoTrack.size.width}x{videoTrack.size.height}
@@ -285,7 +300,11 @@ export default function WatchScreen() {
                   onFullscreen={() => setFullscreen(!isFullscreen)}
                   onOpenSettings={qualities ? () => setShowQuality(true) : undefined}
                   qualityLabel={qualities ? qualityLabel : undefined}
+                  segments={segments}
                 />
+              ) : null}
+              {!failure && segments.length > 0 ? (
+                <SponsorOverlay player={player} segments={segments} />
               ) : null}
             </>
           ) : null}

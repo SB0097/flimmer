@@ -14,6 +14,8 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { formatDuration } from '@/lib/format';
+import { CATEGORY_INFO, type Segment } from '@/lib/segments';
+import { useSponsorSettings } from '@/services/settings/sponsor-settings';
 import {
   clampSeekTarget,
   DEFAULT_TAP_SEEK,
@@ -34,6 +36,8 @@ interface Props {
   onOpenSettings?: () => void;
   /** Kurzlabel neben dem Zahnrad, z. B. „720p“ oder „Auto“ */
   qualityLabel?: string;
+  /** SponsorBlock-Segmente für farbige Markierungen im Fortschrittsbalken */
+  segments?: Segment[];
 }
 
 /**
@@ -48,7 +52,10 @@ export function PlayerControls({
   onFullscreen,
   onOpenSettings,
   qualityLabel,
+  segments = [],
 }: Props) {
+  const sponsorSettings = useSponsorSettings();
+  const markers = segments.filter((seg) => sponsorSettings[seg.category] !== 'off');
   const { isPlaying } = useEvent(player, 'playingChange', { isPlaying: player.playing });
   const { currentTime, bufferedPosition } = useEvent(player, 'timeUpdate', {
     currentTime: player.currentTime,
@@ -192,6 +199,12 @@ export function PlayerControls({
 
       {!isLive && duration > 0 ? (
         <SeekBar
+          markers={markers.map((seg) => ({
+            key: seg.uuid,
+            from: seg.start / duration,
+            to: seg.end / duration,
+            color: CATEGORY_INFO[seg.category].color,
+          }))}
           fraction={dragFraction ?? currentTime / duration}
           buffered={bufferedPosition / duration}
           showThumb={visible}
@@ -227,6 +240,7 @@ function SeekHint({ side, total }: { side: 'left' | 'right'; total: number }) {
 }
 
 interface SeekBarProps {
+  markers: { key: string; from: number; to: number; color: string }[];
   fraction: number;
   buffered: number;
   showThumb: boolean;
@@ -234,7 +248,7 @@ interface SeekBarProps {
   onRelease: (fraction: number) => void;
 }
 
-function SeekBar({ fraction, buffered, showThumb, onDrag, onRelease }: SeekBarProps) {
+function SeekBar({ markers, fraction, buffered, showThumb, onDrag, onRelease }: SeekBarProps) {
   const width = useRef(0);
   const startX = useRef(0);
   const callbacks = useRef({ onDrag, onRelease });
@@ -275,6 +289,15 @@ function SeekBar({ fraction, buffered, showThumb, onDrag, onRelease }: SeekBarPr
       <View style={styles.seekTrack} pointerEvents="none">
         <View style={[styles.seekBuffered, { width: clamp(buffered) }]} />
         <View style={[styles.seekProgress, { width: clamp(fraction) }]} />
+        {markers.map((m) => (
+          <View
+            key={m.key}
+            style={[
+              styles.seekMarker,
+              { left: clamp(m.from), width: clamp(m.to - m.from), backgroundColor: m.color },
+            ]}
+          />
+        ))}
       </View>
       {showThumb ? (
         <View pointerEvents="none" style={[styles.seekThumb, { left: clamp(fraction) }]} />
@@ -382,6 +405,12 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     backgroundColor: RED,
+  },
+  seekMarker: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    opacity: 0.9,
   },
   seekThumb: {
     position: 'absolute',

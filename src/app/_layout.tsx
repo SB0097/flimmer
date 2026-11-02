@@ -16,6 +16,7 @@ export default function RootLayout() {
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="watch/[id]" options={{ headerShown: false }} />
+        <Stack.Screen name="settings" options={{ title: 'Einstellungen' }} />
       </Stack>
     </ThemeProvider>
   );
