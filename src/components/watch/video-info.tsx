@@ -6,16 +6,19 @@ import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { formatViewCount } from '@/lib/format';
-import type { VideoDetails } from '@/services/video-source';
+import type { CommentsResult, VideoDetails } from '@/services/video-source';
 
 interface Props {
   details?: VideoDetails;
+  /** Top-Kommentare für die Vorschau; `null` = deaktiviert/nicht ladbar */
+  comments?: CommentsResult | null;
+  onOpenComments?: () => void;
   /** Inhalt der aufklappbaren technischen Details */
   diagnostics?: React.ReactNode;
 }
 
 /** Infobereich unter dem Player im YouTube-Stil */
-export function VideoInfo({ details, diagnostics }: Props) {
+export function VideoInfo({ details, comments, onOpenComments, diagnostics }: Props) {
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
@@ -95,6 +98,43 @@ export function VideoInfo({ details, diagnostics }: Props) {
         ) : null}
       </Pressable>
 
+      {comments !== undefined ? (
+        <Pressable
+          onPress={comments ? onOpenComments : undefined}
+          style={[styles.description, { backgroundColor: theme.backgroundElement }]}
+          accessibilityRole="button"
+          accessibilityLabel="Kommentare öffnen">
+          <ThemedText type="smallBold">
+            Kommentare{' '}
+            {comments?.countText ? (
+              <ThemedText type="small" themeColor="textSecondary">
+                {comments.countText}
+              </ThemedText>
+            ) : null}
+          </ThemedText>
+          {comments === null ? (
+            <ThemedText type="small" themeColor="textSecondary">
+              Kommentare sind deaktiviert oder nicht verfügbar.
+            </ThemedText>
+          ) : comments.items[0] ? (
+            <View style={styles.commentPreview}>
+              {comments.items[0].author.avatar ? (
+                <Image source={comments.items[0].author.avatar.url} style={styles.smallAvatar} />
+              ) : (
+                <View style={[styles.smallAvatar, { backgroundColor: theme.backgroundSelected }]} />
+              )}
+              <ThemedText type="small" numberOfLines={2} style={styles.flex}>
+                {comments.items[0].text}
+              </ThemedText>
+            </View>
+          ) : (
+            <ThemedText type="small" themeColor="textSecondary">
+              Noch keine Kommentare.
+            </ThemedText>
+          )}
+        </Pressable>
+      ) : null}
+
       <ThemedText type="smallBold" style={styles.sectionTitle}>
         Nächste Videos
       </ThemedText>
@@ -143,6 +183,20 @@ const styles = StyleSheet.create({
   diagnostics: {
     marginTop: Spacing.two,
     gap: Spacing.one,
+  },
+  commentPreview: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.two,
+    marginTop: Spacing.one,
+  },
+  smallAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+  },
+  flex: {
+    flex: 1,
   },
   sectionTitle: {
     marginTop: Spacing.two,

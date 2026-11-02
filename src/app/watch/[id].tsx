@@ -9,12 +9,14 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { VideoCard } from '@/components/video-card';
+import { CommentsPanel } from '@/components/watch/comments-panel';
 import { PlayerControls } from '@/components/watch/player-controls';
 import { VideoInfo } from '@/components/watch/video-info';
 import { Spacing } from '@/constants/theme';
 import {
   StreamUnavailableError,
   videoSource,
+  type CommentsResult,
   type RelatedPage,
   type StreamAttempt,
   type StreamResult,
@@ -35,6 +37,8 @@ export default function WatchScreen() {
   const moreRelated = useRef<RelatedPage['more']>(undefined);
   const loadingMore = useRef(false);
   const [attempt, setAttempt] = useState(0);
+  const [comments, setComments] = useState<CommentsResult | null>();
+  const [showComments, setShowComments] = useState(false);
 
   const videoRef = useRef<VideoView>(null);
   const player = useVideoPlayer(null, (p) => {
@@ -98,8 +102,18 @@ export default function WatchScreen() {
       }
     }
 
+    async function loadComments() {
+      try {
+        const result = await videoSource.getComments(id, 'top');
+        if (!cancelled) setComments(result);
+      } catch {
+        if (!cancelled) setComments(null);
+      }
+    }
+
     loadStream();
     loadPage();
+    loadComments();
     return () => {
       cancelled = true;
     };
@@ -196,20 +210,39 @@ export default function WatchScreen() {
         </View>
       </SafeAreaView>
 
-      <FlatList
-        data={related}
-        keyExtractor={(v) => v.id}
-        renderItem={({ item }) => <VideoCard video={item} />}
-        ListHeaderComponent={<VideoInfo details={details} diagnostics={diagnostics} />}
-        onEndReached={loadMore}
-        onEndReachedThreshold={1.5}
-      />
+      <View style={styles.flex}>
+        <FlatList
+          data={related}
+          keyExtractor={(v) => v.id}
+          renderItem={({ item }) => <VideoCard video={item} />}
+          ListHeaderComponent={
+            <VideoInfo
+              details={details}
+              comments={comments}
+              onOpenComments={() => setShowComments(true)}
+              diagnostics={diagnostics}
+            />
+          }
+          onEndReached={loadMore}
+          onEndReachedThreshold={1.5}
+        />
+        {showComments ? (
+          <CommentsPanel
+            videoId={id}
+            initial={comments ?? undefined}
+            onClose={() => setShowComments(false)}
+          />
+        ) : null}
+      </View>
     </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
+    flex: 1,
+  },
+  flex: {
     flex: 1,
   },
   videoSafeArea: {
