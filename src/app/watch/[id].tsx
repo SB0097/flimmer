@@ -1,5 +1,11 @@
 import { useEvent } from 'expo';
-import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
+import {
+  router,
+  useFocusEffect,
+  useIsFocused,
+  useLocalSearchParams,
+  useNavigation,
+} from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { StatusBar } from 'expo-status-bar';
 import {
@@ -35,6 +41,7 @@ import { VideoInfo } from '@/components/watch/video-info';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { friendlyStreamError } from '@/lib/friendly-error';
+import { library } from '@/services/library/store';
 import { getMiniPlayerFrame, type Frame } from '@/services/playback/mini-frame';
 import { useNowPlaying, type StreamState } from '@/services/playback/now-playing';
 import {
@@ -49,6 +56,7 @@ export default function WatchScreen() {
   const { id, from } = useLocalSearchParams<{ id: string; from?: string }>();
   const theme = useTheme();
   const nowPlaying = useNowPlaying();
+  const focused = useIsFocused();
   const { player, open, retry, chooseQuality: choose, qualities, quality, segments } = nowPlaying;
   // Bis der Player auf dieses Video umgeschaltet hat, gilt es als „lädt“
   const isCurrent = nowPlaying.videoId === id;
@@ -90,6 +98,8 @@ export default function WatchScreen() {
         const result = await videoSource.getWatchPage(id);
         if (cancelled) return;
         setPage(result);
+        library.updateMetadata(result.details);
+        library.cache({ key: `related:${id}`, items: result.related, fetchedAt: Date.now() });
         setRelated(result.related);
         moreRelated.current = result.moreRelated;
       } catch {
@@ -349,7 +359,7 @@ export default function WatchScreen() {
           <SafeAreaView edges={isFullscreen ? [] : ['top']} style={isFullscreen && styles.flex}>
             <Animated.View style={isFullscreen ? styles.flex : swipe.videoStyle}>
               <View style={isFullscreen ? styles.videoFullscreen : styles.videoBox}>
-                {stream.kind === 'ready' ? (
+                {stream.kind === 'ready' && focused ? (
                   <>
                     <PlayerVideo style={StyleSheet.absoluteFill} />
                     {!failure ? (

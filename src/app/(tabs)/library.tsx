@@ -1,60 +1,246 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { useRouter } from 'expo-router';
-import { Pressable, StyleSheet } from 'react-native';
+import { Image } from 'expo-image';
+import { router } from 'expo-router';
+import { useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  FlatList,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { LibraryError } from '@/components/library-actions';
 import { MiniPlayer } from '@/components/mini-player';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
-import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
+import { VideoCard } from '@/components/video-card';
+import { BottomTabInset, Spacing } from '@/constants/theme';
+import { useForYou } from '@/hooks/use-for-you';
 import { useTheme } from '@/hooks/use-theme';
+import { formatDuration } from '@/lib/format';
+import { library, useLibrary } from '@/services/library/store';
+
+type Tab = 'Verlauf' | 'Favoriten' | 'Abos';
 
 export default function LibraryScreen() {
   const theme = useTheme();
-  const router = useRouter();
+  const saved = useLibrary();
+  const [tab, setTab] = useState<Tab>('Verlauf');
+  const feed = useForYou({ enabled: tab === 'Abos', subscriptionsOnly: true });
+  const subscribedIds = new Set(saved.subscriptions.map((s) => s.channel.id));
+  const items =
+    tab === 'Verlauf'
+      ? saved.history.map((h) => h.video)
+      : tab === 'Favoriten'
+        ? saved.favorites.map((f) => f.video)
+        : feed.items.filter((v) => subscribedIds.has(v.channel.id));
+  const counts = {
+    Verlauf: saved.history.length,
+    Favoriten: saved.favorites.length,
+    Abos: saved.subscriptions.length,
+  };
+  const clearHistory = () =>
+    Alert.alert(
+      'Verlauf löschen?',
+      'Die lokalen Sehpositionen und die daraus abgeleiteten Interessen werden entfernt. Favoriten und Abos bleiben erhalten.',
+      [
+        { text: 'Abbrechen', style: 'cancel' },
+        { text: 'Löschen', style: 'destructive', onPress: () => library.removeHistory() },
+      ],
+    );
+
   return (
-    <ThemedView style={styles.container}>
-      <SafeAreaView style={styles.safeArea}>
-        <ThemedText type="title">Bibliothek</ThemedText>
-        <ThemedText themeColor="textSecondary">
-          Favoriten und Verlauf erscheinen hier, sobald M4 umgesetzt ist.
-        </ThemedText>
-        <Pressable
-          onPress={() => router.push('/settings')}
-          style={[styles.row, { backgroundColor: theme.backgroundElement }]}
-          accessibilityRole="button">
-          <MaterialIcons name="settings" size={22} color={theme.text} />
-          <ThemedText style={styles.flex}>Einstellungen</ThemedText>
-          <MaterialIcons name="chevron-right" size={22} color={theme.textSecondary} />
-        </Pressable>
+    <ThemedView style={styles.flex}>
+      <SafeAreaView edges={['top']} style={styles.header}>
+        <View style={styles.row}>
+          <ThemedText type="title" style={styles.flex}>
+            Bibliothek
+          </ThemedText>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Einstellungen öffnen"
+            onPress={() => router.push('/settings')}
+            style={styles.icon}>
+            <MaterialIcons name="settings" size={24} color={theme.text} />
+          </Pressable>
+        </View>
+        <View style={styles.row}>
+          {(['Verlauf', 'Favoriten', 'Abos'] as Tab[]).map((name) => (
+            <Pressable
+              key={name}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: tab === name }}
+              onPress={() => setTab(name)}
+              style={[
+                styles.tab,
+                {
+                  backgroundColor:
+                    tab === name ? theme.backgroundSelected : theme.backgroundElement,
+                },
+              ]}>
+              <ThemedText type="smallBold">
+                {name} · {counts[name]}
+              </ThemedText>
+            </Pressable>
+          ))}
+        </View>
       </SafeAreaView>
+      <FlatList
+        data={items}
+        keyExtractor={(v) => v.id}
+        contentContainerStyle={styles.content}
+        refreshing={tab === 'Abos' && feed.loading}
+        onRefresh={
+          tab === 'Abos'
+            ? () => {
+                void feed.refresh();
+              }
+            : undefined
+        }
+        ListHeaderComponent={
+          <>
+            <LibraryError />
+            {tab === 'Verlauf' && saved.history.length ? (
+              <Pressable accessibilityRole="button" onPress={clearHistory} style={styles.clear}>
+                <ThemedText type="smallBold">Verlauf löschen</ThemedText>
+              </Pressable>
+            ) : null}
+            {tab === 'Abos' ? (
+              <>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.channels}>
+                  {saved.subscriptions.map(({ channel }) => (
+                    <Pressable
+                      key={channel.id}
+                      style={styles.channel}
+                      accessibilityRole="button"
+                      accessibilityLabel={`Kanal öffnen: ${channel.name}`}
+                      onPress={() =>
+                        router.push({ pathname: '/channel/[id]', params: { id: channel.id } })
+                      }>
+                      {channel.avatar ? (
+                        <Image source={channel.avatar.url} style={styles.avatar} />
+                      ) : (
+                        <View
+                          style={[styles.avatar, { backgroundColor: theme.backgroundElement }]}
+                        />
+                      )}
+                      <ThemedText type="small" numberOfLines={2} style={styles.center}>
+                        {channel.name}
+                      </ThemedText>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+                {saved.subscriptions.length ? (
+                  <ThemedText type="subtitle" style={styles.section}>
+                    Neue Videos aus deinen Abos
+                  </ThemedText>
+                ) : null}
+                {feed.error ? (
+                  <ThemedText type="small" themeColor="textSecondary" style={styles.message}>
+                    {feed.error}
+                  </ThemedText>
+                ) : null}
+              </>
+            ) : null}
+          </>
+        }
+        renderItem={({ item }) => {
+          const history =
+            tab === 'Verlauf' ? saved.history.find((h) => h.video.id === item.id) : undefined;
+          return (
+            <View>
+              <VideoCard video={item} />
+              {tab !== 'Abos' ? (
+                <View style={styles.itemActions}>
+                  <ThemedText type="small" themeColor="textSecondary" style={styles.flex}>
+                    {history
+                      ? `${new Date(history.lastWatchedAt).toLocaleDateString('de-DE')} · ${formatDuration(history.position)}${item.durationSeconds ? ` / ${formatDuration(item.durationSeconds)}` : ''}`
+                      : 'Lokal favorisiert'}
+                  </ThemedText>
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      tab === 'Verlauf'
+                        ? `${item.title} aus Verlauf entfernen`
+                        : `${item.title} aus Favoriten entfernen`
+                    }
+                    onPress={() =>
+                      tab === 'Verlauf'
+                        ? library.removeHistory(item.id)
+                        : library.toggleFavorite(item)
+                    }
+                    style={styles.icon}>
+                    <MaterialIcons
+                      name={tab === 'Verlauf' ? 'delete-outline' : 'favorite'}
+                      size={22}
+                      color={theme.textSecondary}
+                    />
+                  </Pressable>
+                </View>
+              ) : null}
+            </View>
+          );
+        }}
+        ListEmptyComponent={
+          tab === 'Abos' && feed.loading && saved.subscriptions.length ? (
+            <ActivityIndicator style={styles.message} />
+          ) : (
+            <ThemedText type="small" themeColor="textSecondary" style={styles.message}>
+              {tab === 'Verlauf'
+                ? 'Hier erscheinen Videos, die du mindestens kurz angesehen hast. Beim nächsten Öffnen geht es an deiner letzten Position weiter.'
+                : tab === 'Favoriten'
+                  ? 'Tippe unter einem Video auf „Favorit“, um es hier zu speichern.'
+                  : saved.subscriptions.length
+                    ? 'Aktuell keine ungesehenen Videos. Ziehe zum Aktualisieren nach unten oder öffne einen Kanal.'
+                    : 'Abonniere einen Kanal auf seiner Kanalseite oder direkt unter einem Video. Deine Abos bleiben auf diesem Gerät.'}
+            </ThemedText>
+          )
+        }
+      />
       <MiniPlayer />
     </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    alignItems: 'center',
+  flex: { flex: 1 },
+  header: {
+    paddingHorizontal: Spacing.three,
+    paddingTop: Spacing.two,
+    paddingBottom: Spacing.three,
+    gap: Spacing.two,
   },
-  row: {
+  row: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
+  tab: {
+    flex: 1,
+    minHeight: 44,
+    paddingHorizontal: Spacing.two,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  icon: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center' },
+  content: { paddingBottom: BottomTabInset + 160 },
+  clear: { alignSelf: 'flex-end', padding: Spacing.three, minHeight: 44 },
+  message: { padding: Spacing.four, textAlign: 'center' },
+  channels: { padding: Spacing.three, gap: Spacing.three },
+  channel: { width: 76, alignItems: 'center', gap: Spacing.two },
+  avatar: { width: 56, height: 56, borderRadius: 28 },
+  center: { textAlign: 'center' },
+  section: { paddingHorizontal: Spacing.three, paddingBottom: Spacing.three },
+  itemActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.three,
-    padding: Spacing.three,
-    borderRadius: 12,
-  },
-  flex: {
-    flex: 1,
-  },
-  safeArea: {
-    flex: 1,
-    width: '100%',
-    maxWidth: MaxContentWidth,
-    paddingHorizontal: Spacing.three,
-    paddingTop: Spacing.four,
-    paddingBottom: BottomTabInset,
-    gap: Spacing.three,
+    paddingLeft: Spacing.three,
+    paddingRight: Spacing.two,
+    marginTop: -Spacing.three,
+    marginBottom: Spacing.three,
   },
 });

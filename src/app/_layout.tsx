@@ -28,6 +28,7 @@ export default function RootLayout() {
             }}
           />
           <Stack.Screen name="settings" options={{ title: 'Einstellungen' }} />
+          <Stack.Screen name="channel/[id]" options={{ title: 'Kanal' }} />
         </Stack>
       </NowPlayingProvider>
     </ThemeProvider>
