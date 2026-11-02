@@ -3,6 +3,10 @@ import { Constants, Innertube, Platform, YTNodes, type Types, type YT } from 'yo
 import {
   StreamUnavailableError,
   type PlaybackSource,
+  type Comment,
+  type CommentSort,
+  type CommentsPage,
+  type CommentsResult,
   type RelatedPage,
   type WatchPage,
   type SearchPage,
@@ -15,6 +19,7 @@ import {
 } from '../types';
 import { applyClientOverrides } from './client-overrides';
 import { evaluatePlayerScript } from './evaluator';
+import { toComment, type CommentViewLike } from './comments';
 import { lockupToSummary, type LockupLike } from './lockup';
 import { planSource } from './select-source';
 
@@ -77,6 +82,15 @@ export class YouTubeJsSource implements VideoSource {
     const info = await yt.getInfo(id, { client: 'WEB' });
     const page = toRelatedPage(info);
     return { details: toWatchDetails(id, info), related: page.items, moreRelated: page.more };
+  }
+
+  async getComments(id: string, sort: CommentSort): Promise<CommentsResult> {
+    const yt = await this.getInnertube();
+    const result = await yt.getComments(id, sort === 'newest' ? 'NEWEST_FIRST' : 'TOP_COMMENTS');
+    const page = toCommentsPage(result);
+    const header = result.header as { count?: { toString(): string } } | undefined;
+    const countText = header?.count?.toString().replace(/\s*Kommentare?$/i, '') || undefined;
+    return { ...page, countText };
   }
 
   async getStreams(id: string): Promise<StreamResult> {
@@ -166,6 +180,53 @@ export class YouTubeJsSource implements VideoSource {
         return { reason: plan.reason };
     }
   }
+}
+
+type CommentThreadNode = YTNodes.CommentThread;
+
+function threadToComment(thread: CommentThreadNode): Comment | undefined {
+  const view = thread.comment as unknown as CommentViewLike | undefined;
+  if (!view) return undefined;
+  return toComment(view, thread.has_replies ? () => repliesPage(thread) : undefined);
+}
+
+async function repliesPage(thread: CommentThreadNode): Promise<CommentsPage> {
+  const loaded = await thread.getReplies();
+  return threadRepliesToPage(loaded as unknown as RepliesBatch);
+}
+
+/** Gemeinsame Form von CommentThread (erste Antworten) und CommentsContinuation (weitere) */
+interface RepliesBatch {
+  replies?: unknown[] | null;
+  has_continuation: boolean;
+  getContinuation(): Promise<RepliesBatch>;
+}
+
+function threadRepliesToPage(thread: RepliesBatch): CommentsPage {
+  const items = (thread.replies ?? [])
+    .map((reply) => {
+      const view = (reply as unknown as { comment?: CommentViewLike }).comment ?? reply;
+      return toComment(view as CommentViewLike);
+    })
+    .filter((c): c is Comment => c !== undefined);
+  return {
+    items,
+    more: thread.has_continuation
+      ? async () => threadRepliesToPage(await thread.getContinuation())
+      : undefined,
+  };
+}
+
+function toCommentsPage(result: YT.Comments): CommentsPage {
+  const items = result.contents
+    .map((thread) => threadToComment(thread))
+    .filter((c): c is Comment => c !== undefined);
+  return {
+    items,
+    more: result.has_continuation
+      ? async () => toCommentsPage(await result.getContinuation())
+      : undefined,
+  };
 }
 
 function toRelatedPage(info: YT.VideoInfo): RelatedPage {
