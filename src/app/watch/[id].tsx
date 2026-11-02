@@ -166,12 +166,13 @@ export default function WatchScreen() {
   const swipe = useMinimizeGesture({
     isFullscreen,
     getFrames: () => {
-      // Noch nie einen Mini-Player gemessen → übliche Position über der Tab-Leiste schätzen
-      const height = 64;
+      // Noch nie einen Mini-Player gemessen → übliche Position unten rechts über der Tab-Leiste
+      const width = screenWidth * 0.52;
+      const height = (width * 9) / 16;
       const target = getMiniPlayerFrame() ?? {
-        x: 0,
-        y: screenHeight - insets.bottom - 80 - height,
-        width: (height * 16) / 9,
+        x: screenWidth - 8 - width,
+        y: screenHeight - insets.bottom - 80 - 8 - height,
+        width,
         height,
       };
       const video = videoFrame.current ?? {
