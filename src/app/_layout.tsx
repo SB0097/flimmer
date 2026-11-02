@@ -17,7 +17,15 @@ export default function RootLayout() {
         <AnimatedSplashOverlay />
         <Stack>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="watch/[id]" options={{ headerShown: false }} />
+          <Stack.Screen
+            name="watch/[id]"
+            options={{
+              headerShown: false,
+              // durchsichtig, damit beim Runterziehen die App darunter sichtbar ist
+              presentation: 'transparentModal',
+              animation: 'slide_from_bottom',
+            }}
+          />
           <Stack.Screen name="settings" options={{ title: 'Einstellungen' }} />
         </Stack>
       </NowPlayingProvider>

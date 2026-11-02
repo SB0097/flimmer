@@ -1,14 +1,16 @@
 import { useEvent } from 'expo';
-import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Animated,
   BackHandler,
   FlatList,
   Pressable,
   StyleSheet,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -19,8 +21,9 @@ import { ThemedView } from '@/components/themed-view';
 import { VideoCard } from '@/components/video-card';
 import { CommentsPanel } from '@/components/watch/comments-panel';
 import { PlayerControls } from '@/components/watch/player-controls';
-import { QualitySheet } from '@/components/watch/quality-sheet';
+import { PlayerMenu } from '@/components/watch/player-menu';
 import { SponsorOverlay } from '@/components/watch/sponsor-overlay';
+import { useMinimizeGesture } from '@/components/watch/use-minimize-gesture';
 import { VideoInfo } from '@/components/watch/video-info';
 import { Spacing } from '@/constants/theme';
 import { friendlyStreamError } from '@/lib/friendly-error';
@@ -137,6 +140,19 @@ export default function WatchScreen() {
     ).catch(() => {});
   }, []);
 
+  // Runterziehen → Mini-Player (alle Video-Seiten schließen, zurück zu den Tabs)
+  const minimize = useCallback(() => {
+    if (router.canDismiss()) router.dismissAll();
+    else router.replace('/');
+  }, []);
+  const { height: screenHeight } = useWindowDimensions();
+  const swipe = useMinimizeGesture({
+    isFullscreen,
+    screenHeight,
+    onMinimize: minimize,
+    onExitFullscreen: () => setFullscreen(false),
+  });
+
   useEffect(() => {
     if (!isFullscreen) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -202,98 +218,104 @@ export default function WatchScreen() {
   );
 
   return (
-    <ThemedView style={[styles.container, isFullscreen && styles.fullscreenContainer]}>
-      <StatusBar style="light" hidden={isFullscreen} />
-      <SafeAreaView
-        edges={isFullscreen ? [] : ['top']}
-        style={[styles.videoSafeArea, isFullscreen && styles.flex]}>
-        <View style={isFullscreen ? styles.videoFullscreen : styles.videoBox}>
-          {stream.kind === 'ready' ? (
-            <>
-              <PlayerVideo style={StyleSheet.absoluteFill} />
-              {!failure ? (
-                <PlayerControls
-                  player={player}
-                  isLive={Boolean(details?.isLive)}
-                  isFullscreen={isFullscreen}
-                  onFullscreen={() => setFullscreen(!isFullscreen)}
-                  onOpenSettings={qualities ? () => setShowQuality(true) : undefined}
-                  qualityLabel={qualities ? qualityLabel : undefined}
-                  segments={segments}
+    <Animated.View style={[styles.container, swipe.style]}>
+      <ThemedView style={[styles.container, isFullscreen && styles.fullscreenContainer]}>
+        <StatusBar style="light" hidden={isFullscreen} />
+        <View {...swipe.panHandlers}>
+          <SafeAreaView
+            edges={isFullscreen ? [] : ['top']}
+            style={[styles.videoSafeArea, isFullscreen && styles.flex]}>
+            <View style={isFullscreen ? styles.videoFullscreen : styles.videoBox}>
+              {stream.kind === 'ready' ? (
+                <>
+                  <PlayerVideo style={StyleSheet.absoluteFill} />
+                  {!failure ? (
+                    <PlayerControls
+                      player={player}
+                      isLive={Boolean(details?.isLive)}
+                      isFullscreen={isFullscreen}
+                      onFullscreen={() => setFullscreen(!isFullscreen)}
+                      onOpenSettings={() => setShowQuality(true)}
+                      qualityLabel={qualities ? qualityLabel : undefined}
+                      segments={segments}
+                    />
+                  ) : null}
+                  {!failure && segments.length > 0 ? (
+                    <SponsorOverlay player={player} segments={segments} />
+                  ) : null}
+                </>
+              ) : null}
+              {!failure &&
+              (stream.kind === 'loading' || (stream.kind === 'ready' && status === 'loading')) ? (
+                <ActivityIndicator
+                  style={StyleSheet.absoluteFill}
+                  size="large"
+                  color="#fff"
+                  pointerEvents="none"
                 />
               ) : null}
-              {!failure && segments.length > 0 ? (
-                <SponsorOverlay player={player} segments={segments} />
-              ) : null}
-            </>
-          ) : null}
-          {!failure &&
-          (stream.kind === 'loading' || (stream.kind === 'ready' && status === 'loading')) ? (
-            <ActivityIndicator
-              style={StyleSheet.absoluteFill}
-              size="large"
-              color="#fff"
-              pointerEvents="none"
-            />
-          ) : null}
-          {failure ? (
-            <View style={[StyleSheet.absoluteFill, styles.errorBox]}>
-              <ThemedText type="smallBold" style={styles.white}>
-                {failure.title}
-              </ThemedText>
-              {failure.hint ? (
-                <ThemedText type="small" style={[styles.white, styles.center]}>
-                  {failure.hint}
-                </ThemedText>
-              ) : null}
-              {failure.retryable ? (
-                <Pressable onPress={retry} style={styles.retry} accessibilityRole="button">
+              {failure ? (
+                <View style={[StyleSheet.absoluteFill, styles.errorBox]}>
                   <ThemedText type="smallBold" style={styles.white}>
-                    Erneut versuchen
+                    {failure.title}
                   </ThemedText>
-                </Pressable>
+                  {failure.hint ? (
+                    <ThemedText type="small" style={[styles.white, styles.center]}>
+                      {failure.hint}
+                    </ThemedText>
+                  ) : null}
+                  {failure.retryable ? (
+                    <Pressable onPress={retry} style={styles.retry} accessibilityRole="button">
+                      <ThemedText type="smallBold" style={styles.white}>
+                        Erneut versuchen
+                      </ThemedText>
+                    </Pressable>
+                  ) : null}
+                </View>
               ) : null}
             </View>
-          ) : null}
+          </SafeAreaView>
         </View>
-      </SafeAreaView>
 
-      {!isFullscreen ? (
-        <View style={styles.flex}>
-          <FlatList
-            data={related}
-            keyExtractor={(v) => v.id}
-            renderItem={({ item }) => <VideoCard video={item} />}
-            ListHeaderComponent={
-              <VideoInfo
-                details={details}
-                comments={comments}
-                onOpenComments={() => setShowComments(true)}
-                diagnostics={diagnostics}
-              />
-            }
-            onEndReached={loadMore}
-            onEndReachedThreshold={1.5}
-          />
-          {showComments ? (
-            <CommentsPanel
-              videoId={id}
-              initial={comments ?? undefined}
-              onClose={() => setShowComments(false)}
+        {!isFullscreen ? (
+          <View style={styles.flex}>
+            <FlatList
+              data={related}
+              keyExtractor={(v) => v.id}
+              renderItem={({ item }) => <VideoCard video={item} />}
+              ListHeaderComponent={
+                <VideoInfo
+                  details={details}
+                  comments={comments}
+                  onOpenComments={() => setShowComments(true)}
+                  diagnostics={diagnostics}
+                />
+              }
+              onEndReached={loadMore}
+              onEndReachedThreshold={1.5}
             />
-          ) : null}
-        </View>
-      ) : null}
+            {showComments ? (
+              <CommentsPanel
+                videoId={id}
+                initial={comments ?? undefined}
+                onClose={() => setShowComments(false)}
+              />
+            ) : null}
+          </View>
+        ) : null}
 
-      <QualitySheet
-        visible={showQuality}
-        options={qualities?.options ?? []}
-        selected={quality}
-        autoHeight={quality === undefined ? videoTrack?.size?.height : undefined}
-        onSelect={chooseQuality}
-        onClose={() => setShowQuality(false)}
-      />
-    </ThemedView>
+        <PlayerMenu
+          visible={showQuality}
+          onClose={() => setShowQuality(false)}
+          qualityOptions={qualities?.options ?? []}
+          quality={quality}
+          autoHeight={quality === undefined ? videoTrack?.size?.height : undefined}
+          onSelectQuality={chooseQuality}
+          sleepEndsAt={nowPlaying.sleepEndsAt}
+          onSetSleepTimer={nowPlaying.setSleepTimer}
+        />
+      </ThemedView>
+    </Animated.View>
   );
 }
 

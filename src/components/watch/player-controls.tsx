@@ -170,7 +170,7 @@ export function PlayerControls({
                   hitSlop={10}
                   style={styles.settings}
                   accessibilityRole="button"
-                  accessibilityLabel="Qualität">
+                  accessibilityLabel="Einstellungen">
                   <MaterialIcons name="settings" size={22} color="#fff" />
                   {qualityLabel ? (
                     <ThemedText type="smallBold" style={[styles.white, styles.qualityLabel]}>
@@ -197,7 +197,8 @@ export function PlayerControls({
         </View>
       ) : null}
 
-      {!isLive && duration > 0 ? (
+      {/* Im Vollbild nur zusammen mit der Steuerung zeigen, im Hochformat immer (wie YouTube) */}
+      {!isLive && duration > 0 && (visible || !isFullscreen) ? (
         <SeekBar
           markers={markers.map((seg) => ({
             key: seg.uuid,

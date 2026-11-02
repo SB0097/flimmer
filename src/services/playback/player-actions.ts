@@ -60,3 +60,8 @@ export function pauseIfPipDismissed(player: VideoPlayer, graceMs = 800) {
     if (check()) subscription.remove();
   });
 }
+
+/** Lautstärke des Players (0–1) setzen, z. B. zum Ausblenden beim Sleep-Timer */
+export function setPlayerVolume(player: VideoPlayer, volume: number) {
+  player.volume = volume;
+}
