@@ -435,8 +435,9 @@ export default function WatchScreen() {
           quality={quality}
           autoHeight={quality === undefined ? videoTrack?.size?.height : undefined}
           onSelectQuality={chooseQuality}
-          sleepEndsAt={nowPlaying.sleepEndsAt}
+          sleepTimer={nowPlaying.sleepTimer}
           onSetSleepTimer={nowPlaying.setSleepTimer}
+          isLive={Boolean(details?.isLive)}
         />
       </Animated.View>
     </View>

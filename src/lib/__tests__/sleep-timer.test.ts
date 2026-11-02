@@ -1,4 +1,4 @@
-import { FADE_MS, remainingLabel, sleepStep } from '../sleep-timer';
+import { FADE_MS, remainingLabel, sleepRemainingMs, sleepStep } from '../sleep-timer';
 
 describe('sleepStep', () => {
   it('macht nichts, solange genug Zeit bleibt', () => {
@@ -29,5 +29,19 @@ describe('remainingLabel', () => {
 
   it('zeigt Sekunden unter einer Minute', () => {
     expect(remainingLabel(45_000)).toBe('noch 45 Sek.');
+  });
+});
+
+describe('sleepRemainingMs', () => {
+  it('rechnet bei fester Zeit ab jetzt', () => {
+    expect(sleepRemainingMs({ kind: 'time', endsAt: 5000 }, 2000, 0, 0)).toBe(3000);
+  });
+
+  it('rechnet bei „Ende des Videos“ mit der Restlaufzeit', () => {
+    expect(sleepRemainingMs({ kind: 'endOfVideo', videoId: 'x' }, 0, 590, 600)).toBe(10_000);
+  });
+
+  it('ist bei unbekannter Dauer (Livestream) nicht bestimmbar', () => {
+    expect(sleepRemainingMs({ kind: 'endOfVideo', videoId: 'x' }, 0, 10, 0)).toBeUndefined();
   });
 });
