@@ -2,10 +2,18 @@ import { useEvent } from 'expo';
 import { router, useFocusEffect, useLocalSearchParams, useNavigation } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useRef, useState, type ComponentRef } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type ComponentRef,
+} from 'react';
 import {
   ActivityIndicator,
   Animated,
+  Easing,
   BackHandler,
   FlatList,
   Pressable,
@@ -17,7 +25,6 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import { PlayerVideo } from '@/components/player-video';
 import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
 import { VideoCard } from '@/components/video-card';
 import { CommentsPanel } from '@/components/watch/comments-panel';
 import { PlayerControls } from '@/components/watch/player-controls';
@@ -26,6 +33,7 @@ import { SponsorOverlay } from '@/components/watch/sponsor-overlay';
 import { useMinimizeGesture } from '@/components/watch/use-minimize-gesture';
 import { VideoInfo } from '@/components/watch/video-info';
 import { Spacing } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
 import { friendlyStreamError } from '@/lib/friendly-error';
 import { getMiniPlayerFrame, type Frame } from '@/services/playback/mini-frame';
 import { useNowPlaying, type StreamState } from '@/services/playback/now-playing';
@@ -38,7 +46,8 @@ import {
 } from '@/services/video-source';
 
 export default function WatchScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, from } = useLocalSearchParams<{ id: string; from?: string }>();
+  const theme = useTheme();
   const nowPlaying = useNowPlaying();
   const { player, open, retry, chooseQuality: choose, qualities, quality, segments } = nowPlaying;
   // Bis der Player auf dieses Video umgeschaltet hat, gilt es als „lädt“
@@ -142,10 +151,9 @@ export default function WatchScreen() {
   }, []);
 
   // Runterziehen → Video schrumpft in den Mini-Player. Danach alle Video-Seiten
-  // ohne weitere Animation schließen (das Video sitzt schon an Ort und Stelle).
+  // schließen; die Seite hat keine eigene System-Animation (das Video sitzt schon im Mini-Player).
   const navigation = useNavigation();
   const minimize = useCallback(() => {
-    navigation.setOptions({ animation: 'none' });
     const routes = navigation.getState()?.routes ?? [];
     let count = 0;
     for (let i = routes.length - 1; i >= 0 && routes[i].name === 'watch/[id]'; i--) count++;
@@ -153,29 +161,38 @@ export default function WatchScreen() {
     else router.replace('/');
   }, [navigation]);
 
-  // Position des Videos auf dem Bildschirm (Start der Schrumpf-Animation)
-  const videoRef = useRef<ComponentRef<typeof View>>(null);
-  const videoFrame = useRef<Frame | undefined>(undefined);
-  const measureVideo = useCallback(() => {
-    videoRef.current?.measureInWindow((x, y, width, height) => {
-      videoFrame.current = { x, y, width, height };
+  // Lage dieser Seite im Fenster – Bezugspunkt für die Mini-Player-Position
+  const rootRef = useRef<ComponentRef<typeof View>>(null);
+  const [origin, setOrigin] = useState({ x: 0, y: 0 });
+  const [measured, setMeasured] = useState(false);
+  const measureRoot = () =>
+    rootRef.current?.measureInWindow((x, y) => {
+      setOrigin({ x, y });
+      setMeasured(true);
     });
-  }, []);
+
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
   const swipe = useMinimizeGesture({
     isFullscreen,
     getFrames: () => {
-      // Noch nie einen Mini-Player gemessen → übliche Position unten rechts über der Tab-Leiste
+      // Alles relativ zu dieser Seite rechnen (Messungen in Fenster-Koordinaten
+      // können je nach Seite um die Statusleiste verschoben sein)
       const width = screenWidth * 0.52;
       const height = (width * 9) / 16;
-      const target = getMiniPlayerFrame() ?? {
-        x: screenWidth - 8 - width,
-        y: screenHeight - insets.bottom - 80 - 8 - height,
-        width,
-        height,
-      };
-      const video = videoFrame.current ?? {
+      const measured = getMiniPlayerFrame();
+      const target = measured
+        ? { ...measured, x: measured.x - origin.x, y: measured.y - origin.y }
+        : // Noch nie gemessen → übliche Position unten rechts über der Tab-Leiste
+          {
+            x: screenWidth - 8 - width,
+            y: screenHeight - insets.bottom - 80 - 8 - height,
+            width,
+            height,
+          };
+      // Video sitzt im Hochformat immer direkt unter der Statusleiste, volle Breite.
+      // Bewusst berechnet statt gemessen: Messen würde laufende Animationen mitzählen.
+      const video: Frame = {
         x: 0,
         y: insets.top,
         width: screenWidth,
@@ -185,7 +202,51 @@ export default function WatchScreen() {
     },
     onMinimize: minimize,
     onExitFullscreen: () => setFullscreen(false),
+    onEnterFullscreen: () => setFullscreen(true),
+    startMinimized: from === 'mini',
   });
+
+  // Öffnen: aus dem Mini-Player heraus wachsen, sonst von unten hereinschieben
+  const [enterY] = useState(() => new Animated.Value(from === 'mini' ? 0 : screenHeight));
+  useLayoutEffect(() => {
+    if (from === 'mini') {
+      // wartet auf die Messung der Seite (siehe unten)
+    } else {
+      Animated.timing(enterY, {
+        toValue: 0,
+        duration: 260,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start();
+    }
+    // nur beim ersten Anzeigen
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const minimizeVideo = swipe.minimize;
+  // Aus dem Mini-Player: wachsen, sobald die Seite gemessen ist (Ziel stimmt erst dann)
+  const expandFromMini = swipe.expandFromMini;
+  useEffect(() => {
+    if (from === 'mini' && measured) expandFromMini();
+  }, [from, measured, expandFromMini]);
+
+  // Zurück-Taste wie bei YouTube: Video schrumpft in den Mini-Player
+  useFocusEffect(
+    useCallback(() => {
+      const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+        minimizeVideo();
+        return true;
+      });
+      return () => sub.remove();
+    }, [minimizeVideo]),
+  );
+
+  // Bereich der Tab-Leiste (unter dem Mini-Fenster) – blendet beim Ziehen früher aus
+  const miniFrame = getMiniPlayerFrame();
+  const navTop = miniFrame
+    ? miniFrame.y - origin.y + miniFrame.height + 8
+    : screenHeight - insets.bottom - 80;
+  const navHeight = Math.max(0, screenHeight - navTop);
 
   useEffect(() => {
     if (!isFullscreen) return;
@@ -255,113 +316,129 @@ export default function WatchScreen() {
   );
 
   return (
-    <View style={[styles.container, isFullscreen && styles.fullscreenContainer]}>
-      {/* Hintergrund extra, damit er beim Runterziehen ausblenden kann (App darunter wird sichtbar) */}
-      {!isFullscreen ? (
-        <Animated.View
-          pointerEvents="none"
-          style={[StyleSheet.absoluteFill, { opacity: swipe.backgroundOpacity }]}>
-          <View style={[styles.statusBand, { height: insets.top }]} />
-          <ThemedView style={styles.flex} />
-        </Animated.View>
-      ) : null}
-      <StatusBar style="light" hidden={isFullscreen} />
-      <View {...swipe.panHandlers} style={isFullscreen && styles.flex}>
-        <SafeAreaView edges={isFullscreen ? [] : ['top']} style={isFullscreen && styles.flex}>
-          <Animated.View style={isFullscreen ? styles.flex : swipe.videoStyle}>
-            <View
-              ref={videoRef}
-              onLayout={measureVideo}
-              style={isFullscreen ? styles.videoFullscreen : styles.videoBox}>
-              {stream.kind === 'ready' ? (
-                <>
-                  <PlayerVideo style={StyleSheet.absoluteFill} />
-                  {!failure ? (
-                    <PlayerControls
-                      player={player}
-                      isLive={Boolean(details?.isLive)}
-                      isFullscreen={isFullscreen}
-                      onFullscreen={() => setFullscreen(!isFullscreen)}
-                      onOpenSettings={() => setShowQuality(true)}
-                      qualityLabel={qualities ? qualityLabel : undefined}
-                      segments={segments}
-                      isLoading={isLoading}
-                    />
-                  ) : null}
-                  {!failure && segments.length > 0 ? (
-                    <SponsorOverlay player={player} segments={segments} />
-                  ) : null}
-                </>
-              ) : null}
-              {isLoading ? (
-                <ActivityIndicator
-                  style={StyleSheet.absoluteFill}
-                  size="large"
-                  color="#fff"
-                  pointerEvents="none"
-                />
-              ) : null}
-              {failure ? (
-                <View style={[StyleSheet.absoluteFill, styles.errorBox]}>
-                  <ThemedText type="smallBold" style={styles.white}>
-                    {failure.title}
-                  </ThemedText>
-                  {failure.hint ? (
-                    <ThemedText type="small" style={[styles.white, styles.center]}>
-                      {failure.hint}
-                    </ThemedText>
-                  ) : null}
-                  {failure.retryable ? (
-                    <Pressable onPress={retry} style={styles.retry} accessibilityRole="button">
-                      <ThemedText type="smallBold" style={styles.white}>
-                        Erneut versuchen
-                      </ThemedText>
-                    </Pressable>
-                  ) : null}
-                </View>
-              ) : null}
-            </View>
-          </Animated.View>
-        </SafeAreaView>
-      </View>
-
-      {!isFullscreen ? (
-        <Animated.View style={[styles.flex, { opacity: swipe.contentOpacity }]}>
-          <FlatList
-            data={related}
-            keyExtractor={(v) => v.id}
-            renderItem={({ item }) => <VideoCard video={item} />}
-            ListHeaderComponent={
-              <VideoInfo
-                details={details}
-                comments={comments}
-                onOpenComments={() => setShowComments(true)}
-                diagnostics={diagnostics}
-              />
-            }
-            onEndReached={loadMore}
-            onEndReachedThreshold={1.5}
-          />
-          {showComments ? (
-            <CommentsPanel
-              videoId={id}
-              initial={comments ?? undefined}
-              onClose={() => setShowComments(false)}
+    <View ref={rootRef} onLayout={measureRoot} style={styles.container}>
+      <Animated.View
+        style={[
+          styles.container,
+          isFullscreen && styles.fullscreenContainer,
+          { transform: [{ translateY: enterY }] },
+        ]}>
+        {/* Hintergrund extra, damit er beim Runterziehen ausblenden kann (App darunter wird sichtbar) */}
+        {!isFullscreen ? (
+          <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+            <Animated.View
+              style={[styles.statusBand, { height: insets.top, opacity: swipe.backgroundOpacity }]}
             />
-          ) : null}
-        </Animated.View>
-      ) : null}
+            <Animated.View
+              style={[
+                styles.flex,
+                { backgroundColor: theme.background, opacity: swipe.backgroundOpacity },
+              ]}
+            />
+            <Animated.View
+              style={{
+                height: navHeight,
+                backgroundColor: theme.background,
+                opacity: swipe.navOpacity,
+              }}
+            />
+          </View>
+        ) : null}
+        <StatusBar style="light" hidden={isFullscreen} />
+        <View {...swipe.panHandlers} style={isFullscreen && styles.flex}>
+          <SafeAreaView edges={isFullscreen ? [] : ['top']} style={isFullscreen && styles.flex}>
+            <Animated.View style={isFullscreen ? styles.flex : swipe.videoStyle}>
+              <View style={isFullscreen ? styles.videoFullscreen : styles.videoBox}>
+                {stream.kind === 'ready' ? (
+                  <>
+                    <PlayerVideo style={StyleSheet.absoluteFill} />
+                    {!failure ? (
+                      <PlayerControls
+                        player={player}
+                        isLive={Boolean(details?.isLive)}
+                        isFullscreen={isFullscreen}
+                        onFullscreen={() => setFullscreen(!isFullscreen)}
+                        onOpenSettings={() => setShowQuality(true)}
+                        qualityLabel={qualities ? qualityLabel : undefined}
+                        segments={segments}
+                        isLoading={isLoading}
+                      />
+                    ) : null}
+                    {!failure && segments.length > 0 ? (
+                      <SponsorOverlay player={player} segments={segments} />
+                    ) : null}
+                  </>
+                ) : null}
+                {isLoading ? (
+                  <ActivityIndicator
+                    style={StyleSheet.absoluteFill}
+                    size="large"
+                    color="#fff"
+                    pointerEvents="none"
+                  />
+                ) : null}
+                {failure ? (
+                  <View style={[StyleSheet.absoluteFill, styles.errorBox]}>
+                    <ThemedText type="smallBold" style={styles.white}>
+                      {failure.title}
+                    </ThemedText>
+                    {failure.hint ? (
+                      <ThemedText type="small" style={[styles.white, styles.center]}>
+                        {failure.hint}
+                      </ThemedText>
+                    ) : null}
+                    {failure.retryable ? (
+                      <Pressable onPress={retry} style={styles.retry} accessibilityRole="button">
+                        <ThemedText type="smallBold" style={styles.white}>
+                          Erneut versuchen
+                        </ThemedText>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                ) : null}
+              </View>
+            </Animated.View>
+          </SafeAreaView>
+        </View>
 
-      <PlayerMenu
-        visible={showQuality}
-        onClose={() => setShowQuality(false)}
-        qualityOptions={qualities?.options ?? []}
-        quality={quality}
-        autoHeight={quality === undefined ? videoTrack?.size?.height : undefined}
-        onSelectQuality={chooseQuality}
-        sleepEndsAt={nowPlaying.sleepEndsAt}
-        onSetSleepTimer={nowPlaying.setSleepTimer}
-      />
+        {!isFullscreen ? (
+          <Animated.View style={[styles.flex, { opacity: swipe.contentOpacity }]}>
+            <FlatList
+              data={related}
+              keyExtractor={(v) => v.id}
+              renderItem={({ item }) => <VideoCard video={item} />}
+              ListHeaderComponent={
+                <VideoInfo
+                  details={details}
+                  comments={comments}
+                  onOpenComments={() => setShowComments(true)}
+                  diagnostics={diagnostics}
+                />
+              }
+              onEndReached={loadMore}
+              onEndReachedThreshold={1.5}
+            />
+            {showComments ? (
+              <CommentsPanel
+                videoId={id}
+                initial={comments ?? undefined}
+                onClose={() => setShowComments(false)}
+              />
+            ) : null}
+          </Animated.View>
+        ) : null}
+
+        <PlayerMenu
+          visible={showQuality}
+          onClose={() => setShowQuality(false)}
+          qualityOptions={qualities?.options ?? []}
+          quality={quality}
+          autoHeight={quality === undefined ? videoTrack?.size?.height : undefined}
+          onSelectQuality={chooseQuality}
+          sleepEndsAt={nowPlaying.sleepEndsAt}
+          onSetSleepTimer={nowPlaying.setSleepTimer}
+        />
+      </Animated.View>
     </View>
   );
 }

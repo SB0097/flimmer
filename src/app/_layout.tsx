@@ -23,7 +23,8 @@ export default function RootLayout() {
               headerShown: false,
               // durchsichtig, damit beim Runterziehen die App darunter sichtbar ist
               presentation: 'transparentModal',
-              animation: 'slide_from_bottom',
+              // Öffnen/Schließen animiert die Seite selbst (aus dem Mini-Player heraus / hinein)
+              animation: 'none',
             }}
           />
           <Stack.Screen name="settings" options={{ title: 'Einstellungen' }} />
