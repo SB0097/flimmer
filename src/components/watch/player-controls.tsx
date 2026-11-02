@@ -62,25 +62,21 @@ export function PlayerControls({
   const [seekHint, setSeekHint] = useState<{ side: 'left' | 'right'; total: number }>();
   const [dragFraction, setDragFraction] = useState<number>();
   const [width, setWidth] = useState(0);
+  /** Zählt Bedienungen; jede startet den Ausblende-Timer neu */
+  const [interaction, setInteraction] = useState(0);
+  const touch = useCallback(() => setInteraction((n) => n + 1), []);
 
   const tapState = useRef<TapState>({});
-  const singleTapTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const seekHintTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  // Steuerung beim Abspielen nach einigen Sekunden ausblenden
+  // Steuerung beim Abspielen nach einigen Sekunden ohne Bedienung ausblenden
   useEffect(() => {
     if (!visible || !isPlaying || dragFraction !== undefined) return;
     const t = setTimeout(() => setVisible(false), HIDE_AFTER_MS);
     return () => clearTimeout(t);
-  }, [visible, isPlaying, dragFraction, currentTime]);
+  }, [visible, isPlaying, dragFraction, interaction]);
 
-  useEffect(
-    () => () => {
-      clearTimeout(singleTapTimer.current);
-      clearTimeout(seekHintTimer.current);
-    },
-    [],
-  );
+  useEffect(() => () => clearTimeout(seekHintTimer.current), []);
 
   const onSurfacePress = useCallback(
     (e: GestureResponderEvent) => {
@@ -89,7 +85,8 @@ export function PlayerControls({
       tapState.current = state;
 
       if (action.type === 'seek') {
-        clearTimeout(singleTapTimer.current);
+        // Beim Spulen nur den Hinweis zeigen, nicht die Steuerung
+        setVisible(false);
         const target = clampSeekTarget(player.currentTime, action.seconds, player.duration);
         player.seekBy(target - player.currentTime);
         setSeekHint({ side: action.side, total: action.total });
@@ -101,20 +98,19 @@ export function PlayerControls({
         return;
       }
 
-      clearTimeout(singleTapTimer.current);
-      singleTapTimer.current = setTimeout(
-        () => setVisible((v) => !v),
-        DEFAULT_TAP_SEEK.doubleTapMs,
-      );
+      // Einzeltipp sofort umsetzen; folgt ein zweiter Tipp, wird oben gespult
+      setVisible((v) => !v);
+      touch();
     },
-    [player, width],
+    [player, width, touch],
   );
 
   const togglePlay = useCallback(() => {
     if (player.playing) player.pause();
     else player.play();
     setVisible(true);
-  }, [player]);
+    touch();
+  }, [player, touch]);
 
   return (
     <View
@@ -160,7 +156,10 @@ export function PlayerControls({
             <View style={styles.rightButtons}>
               {onOpenSettings ? (
                 <Pressable
-                  onPress={onOpenSettings}
+                  onPress={() => {
+                    touch();
+                    onOpenSettings();
+                  }}
                   hitSlop={10}
                   style={styles.settings}
                   accessibilityRole="button"
