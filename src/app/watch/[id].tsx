@@ -25,6 +25,7 @@ import { VideoInfo } from '@/components/watch/video-info';
 import { Spacing } from '@/constants/theme';
 import { friendlyStreamError } from '@/lib/friendly-error';
 import type { Segment } from '@/lib/segments';
+import { applyPlaybackSettings } from '@/services/playback/background';
 import { loadQualities, sourceForQuality, type QualityInfo } from '@/services/playback/quality';
 import { fetchSegments } from '@/services/sponsorblock/sponsorblock';
 import {
@@ -39,6 +40,7 @@ import {
   type VideoSummary,
   type WatchPage,
 } from '@/services/video-source';
+import { playbackSettings, usePlaybackSettings } from '@/services/settings/playback-settings';
 
 type StreamState =
   | { kind: 'loading' }
@@ -83,8 +85,9 @@ export default function WatchScreen() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [segments, setSegments] = useState<Segment[]>([]);
 
+  const playback = usePlaybackSettings();
   const player = useVideoPlayer(null, (p) => {
-    p.staysActiveInBackground = true;
+    applyPlaybackSettings(p, playbackSettings.get());
     p.showNowPlayingNotification = true;
     p.timeUpdateEventInterval = 0.5;
   });
@@ -92,6 +95,11 @@ export default function WatchScreen() {
     status: player.status,
   });
   const { videoTrack } = useEvent(player, 'videoTrackChange', { videoTrack: player.videoTrack });
+
+  // Einstellung „Im Hintergrund weiterspielen“ live übernehmen
+  useEffect(() => {
+    applyPlaybackSettings(player, playback);
+  }, [player, playback]);
 
   // Beim Verlassen der Seite pausieren und zurück ins Hochformat
   useFocusEffect(

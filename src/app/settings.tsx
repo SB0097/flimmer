@@ -1,10 +1,11 @@
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { CATEGORY_INFO, SEGMENT_CATEGORIES, type CategoryMode } from '@/lib/segments';
+import { playbackSettings, usePlaybackSettings } from '@/services/settings/playback-settings';
 import {
   resetSponsorSettings,
   setCategoryMode,
@@ -20,11 +21,30 @@ const MODES: { mode: CategoryMode; label: string }[] = [
 export default function SettingsScreen() {
   const theme = useTheme();
   const settings = useSponsorSettings();
+  const playback = usePlaybackSettings();
 
   return (
     <ThemedView style={styles.flex}>
       <ScrollView contentContainerStyle={styles.content}>
-        <ThemedText type="subtitle">SponsorBlock</ThemedText>
+        <ThemedText type="subtitle">Wiedergabe</ThemedText>
+        <View style={styles.row}>
+          <View style={styles.flex}>
+            <ThemedText>Im Hintergrund weiterspielen</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              Ton läuft weiter, wenn du die App verlässt oder den Bildschirm sperrst. Steuerung über
+              die Benachrichtigung.
+            </ThemedText>
+          </View>
+          <Switch
+            value={playback.background}
+            onValueChange={(background) => playbackSettings.update({ background })}
+            accessibilityLabel="Im Hintergrund weiterspielen"
+          />
+        </View>
+
+        <ThemedText type="subtitle" style={styles.section}>
+          SponsorBlock
+        </ThemedText>
         <ThemedText type="small" themeColor="textSecondary">
           Von der Community markierte Stellen in Videos. „Auto“ überspringt sie automatisch, „Knopf“
           zeigt einen Überspringen-Knopf, „Aus“ ignoriert sie. Gesendet wird nur ein Teil eines
@@ -100,6 +120,9 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     paddingHorizontal: Spacing.two,
     paddingVertical: Spacing.one,
+  },
+  section: {
+    marginTop: Spacing.three,
   },
   reset: {
     alignSelf: 'flex-start',

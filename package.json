@@ -44,6 +44,7 @@
     "eslint-config-expo": "~58.0.4",
     "jest": "~30.5.2",
     "jest-expo": "~58.0.13",
+    "patch-package": "^8.0.1",
     "prettier": "^3.9.10",
     "typescript": "~6.0.3"
   },
@@ -55,10 +56,20 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "jest",
-    "doctor": "expo-doctor"
+    "doctor": "expo-doctor",
+    "postinstall": "patch-package"
   },
   "private": true,
   "jest": {
     "preset": "jest-expo"
+  },
+  "expo": {
+    "autolinking": {
+      "android": {
+        "buildFromSource": [
+          "expo-video"
+        ]
+      }
+    }
   }
 }
