@@ -1,6 +1,3 @@
-import Storage from 'expo-sqlite/kv-store';
-import { useSyncExternalStore } from 'react';
-
 import {
   DEFAULT_SPONSOR_SETTINGS,
   SEGMENT_CATEGORIES,
@@ -9,7 +6,8 @@ import {
   type SponsorSettings,
 } from '@/lib/segments';
 
-const KEY = 'settings.sponsorblock.v1';
+import { createSettingsStore } from './store';
+
 const MODES: CategoryMode[] = ['auto', 'manual', 'off'];
 
 /** Nimmt gespeicherte Werte, ergänzt fehlende Kategorien mit Standardwerten */
@@ -24,41 +22,13 @@ function sanitize(raw: unknown): SponsorSettings {
   return result;
 }
 
-function load(): SponsorSettings {
-  try {
-    const stored = Storage.getItemSync(KEY);
-    return sanitize(stored ? JSON.parse(stored) : undefined);
-  } catch {
-    return { ...DEFAULT_SPONSOR_SETTINGS };
-  }
-}
-
-let current: SponsorSettings | undefined;
-const listeners = new Set<() => void>();
-
-function getSnapshot(): SponsorSettings {
-  current ??= load();
-  return current;
-}
-
-function subscribe(listener: () => void) {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
+const store = createSettingsStore('settings.sponsorblock.v1', DEFAULT_SPONSOR_SETTINGS, sanitize);
 
 export function setCategoryMode(category: SegmentCategory, mode: CategoryMode) {
-  current = { ...getSnapshot(), [category]: mode };
-  Storage.setItem(KEY, JSON.stringify(current)).catch(() => {});
-  listeners.forEach((l) => l());
+  store.update({ [category]: mode });
 }
 
-export function resetSponsorSettings() {
-  current = { ...DEFAULT_SPONSOR_SETTINGS };
-  Storage.setItem(KEY, JSON.stringify(current)).catch(() => {});
-  listeners.forEach((l) => l());
-}
+export const resetSponsorSettings = store.reset;
 
 /** Aktuelle SponsorBlock-Einstellungen; aktualisiert sich bei Änderungen überall */
-export function useSponsorSettings(): SponsorSettings {
-  return useSyncExternalStore(subscribe, getSnapshot);
-}
+export const useSponsorSettings = store.use;
