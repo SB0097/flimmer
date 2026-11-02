@@ -3,6 +3,7 @@ import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { MiniPlayer } from '@/components/mini-player';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { VideoCard } from '@/components/video-card';
@@ -105,6 +106,7 @@ export default function SearchScreen() {
           }
         />
       )}
+      <MiniPlayer />
     </ThemedView>
   );
 }

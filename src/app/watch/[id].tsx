@@ -2,7 +2,6 @@ import { useEvent } from 'expo';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import { StatusBar } from 'expo-status-bar';
-import { useVideoPlayer, VideoView, type VideoPlayer } from 'expo-video';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -14,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { PlayerVideo } from '@/components/player-video';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { VideoCard } from '@/components/video-card';
@@ -24,116 +24,53 @@ import { SponsorOverlay } from '@/components/watch/sponsor-overlay';
 import { VideoInfo } from '@/components/watch/video-info';
 import { Spacing } from '@/constants/theme';
 import { friendlyStreamError } from '@/lib/friendly-error';
-import type { Segment } from '@/lib/segments';
-import { applyPlaybackSettings } from '@/services/playback/background';
-import { loadQualities, sourceForQuality, type QualityInfo } from '@/services/playback/quality';
-import { fetchSegments } from '@/services/sponsorblock/sponsorblock';
+import { useNowPlaying, type StreamState } from '@/services/playback/now-playing';
 import {
-  StreamUnavailableError,
   videoSource,
   type CommentsResult,
-  type PlaybackSource,
   type RelatedPage,
-  type StreamAttempt,
-  type StreamResult,
-  type VideoDetails,
   type VideoSummary,
   type WatchPage,
 } from '@/services/video-source';
-import { playbackSettings, usePlaybackSettings } from '@/services/settings/playback-settings';
-
-type StreamState =
-  | { kind: 'loading' }
-  | { kind: 'ready'; result: StreamResult }
-  | { kind: 'error'; error: unknown; attempts: StreamAttempt[] };
-
-async function playSource(
-  player: VideoPlayer,
-  source: PlaybackSource,
-  details?: VideoDetails,
-  startAt?: number,
-) {
-  await player.replaceAsync({
-    uri: source.uri,
-    contentType: source.contentType,
-    headers: source.headers,
-    metadata: details
-      ? {
-          title: details.title,
-          artist: details.channel.name,
-          artwork: details.thumbnails.at(-1)?.url,
-        }
-      : undefined,
-  });
-  if (startAt && startAt > 1) player.seekBy(startAt - player.currentTime);
-  player.play();
-}
 
 export default function WatchScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const [stream, setStream] = useState<StreamState>({ kind: 'loading' });
+  const nowPlaying = useNowPlaying();
+  const { player, open, retry, chooseQuality: choose, qualities, quality, segments } = nowPlaying;
+  // Bis der Player auf dieses Video umgeschaltet hat, gilt es als „lädt“
+  const isCurrent = nowPlaying.videoId === id;
+  const stream: StreamState = isCurrent ? nowPlaying.stream : { kind: 'loading' };
+
   const [page, setPage] = useState<WatchPage>();
   const [related, setRelated] = useState<VideoSummary[]>([]);
   const moreRelated = useRef<RelatedPage['more']>(undefined);
   const loadingMore = useRef(false);
-  const [attempt, setAttempt] = useState(0);
   const [comments, setComments] = useState<CommentsResult | null>();
   const [showComments, setShowComments] = useState(false);
-  const [qualities, setQualities] = useState<QualityInfo>();
-  const [quality, setQuality] = useState<number>();
   const [showQuality, setShowQuality] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
-  const [segments, setSegments] = useState<Segment[]>([]);
 
-  const playback = usePlaybackSettings();
-  const player = useVideoPlayer(null, (p) => {
-    applyPlaybackSettings(p, playbackSettings.get());
-    p.showNowPlayingNotification = true;
-    p.timeUpdateEventInterval = 0.5;
-  });
   const { status, error: playerError } = useEvent(player, 'statusChange', {
     status: player.status,
   });
   const { videoTrack } = useEvent(player, 'videoTrackChange', { videoTrack: player.videoTrack });
 
-  // Einstellung „Im Hintergrund weiterspielen“ live übernehmen
-  useEffect(() => {
-    applyPlaybackSettings(player, playback);
-  }, [player, playback]);
-
-  // Beim Verlassen der Seite pausieren und zurück ins Hochformat
+  // Seite sichtbar → dieses Video abspielen (läuft es schon, z. B. aus dem
+  // Mini-Player, geht es nahtlos weiter). Beim Verlassen zurück ins Hochformat;
+  // die Wiedergabe läuft im Mini-Player weiter.
   useFocusEffect(
     useCallback(() => {
+      open(id);
       return () => {
-        player.pause();
+        setIsFullscreen(false);
         ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
       };
-    }, [player]),
+    }, [id, open]),
   );
 
-  // Stream, Seitendaten und Kommentare parallel laden
+  // Seitendaten (Beschreibung, nächste Videos) und Kommentare laden
   useEffect(() => {
     let cancelled = false;
-
-    async function loadStream() {
-      try {
-        const result = await videoSource.getStreams(id);
-        if (cancelled) return;
-        setStream({ kind: 'ready', result });
-        setQuality(undefined);
-        setQualities(undefined);
-        await playSource(player, result.source, result.details);
-        const info = await loadQualities(result.source).catch(() => undefined);
-        if (!cancelled) setQualities(info);
-      } catch (e) {
-        if (cancelled) return;
-        setStream({
-          kind: 'error',
-          error: e,
-          attempts: e instanceof StreamUnavailableError ? e.attempts : [],
-        });
-      }
-    }
 
     async function loadPage() {
       try {
@@ -156,28 +93,12 @@ export default function WatchScreen() {
       }
     }
 
-    async function loadSegments() {
-      try {
-        const result = await fetchSegments(id);
-        if (!cancelled) setSegments(result);
-      } catch {
-        if (!cancelled) setSegments([]);
-      }
-    }
-
-    loadStream();
     loadPage();
     loadComments();
-    loadSegments();
     return () => {
       cancelled = true;
     };
-  }, [id, player, attempt]);
-
-  const retry = useCallback(() => {
-    setStream({ kind: 'loading' });
-    setAttempt((n) => n + 1);
-  }, []);
+  }, [id]);
 
   const loadMore = useCallback(async () => {
     if (!moreRelated.current || loadingMore.current) return;
@@ -199,15 +120,11 @@ export default function WatchScreen() {
   const details = page?.details ?? (stream.kind === 'ready' ? stream.result.details : undefined);
 
   const chooseQuality = useCallback(
-    async (height: number | undefined) => {
+    (height: number | undefined) => {
       setShowQuality(false);
-      if (stream.kind !== 'ready' || !qualities || height === quality) return;
-      setQuality(height);
-      const position = player.currentTime;
-      const source = await sourceForQuality(stream.result.source, qualities, height, id);
-      await playSource(player, source, details, position);
+      choose(height);
     },
-    [stream, qualities, quality, player, id, details],
+    [choose],
   );
 
   // Eigenes Vollbild: Querformat, nur das Video
@@ -293,13 +210,7 @@ export default function WatchScreen() {
         <View style={isFullscreen ? styles.videoFullscreen : styles.videoBox}>
           {stream.kind === 'ready' ? (
             <>
-              <VideoView
-                player={player}
-                style={StyleSheet.absoluteFill}
-                nativeControls={false}
-                allowsPictureInPicture
-                contentFit="contain"
-              />
+              <PlayerVideo style={StyleSheet.absoluteFill} />
               {!failure ? (
                 <PlayerControls
                   player={player}
