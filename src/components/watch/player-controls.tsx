@@ -28,7 +28,12 @@ const RED = '#FF0033';
 interface Props {
   player: VideoPlayer;
   isLive: boolean;
+  isFullscreen?: boolean;
   onFullscreen?: () => void;
+  /** Öffnet die Qualitätsauswahl; ohne Angabe kein Zahnrad */
+  onOpenSettings?: () => void;
+  /** Kurzlabel neben dem Zahnrad, z. B. „720p“ oder „Auto“ */
+  qualityLabel?: string;
 }
 
 /**
@@ -36,7 +41,14 @@ interface Props {
  * Tippen blendet ein/aus, links/rechts doppeltippen spult ±10 s,
  * Fortschrittsbalken zum Antippen oder Ziehen.
  */
-export function PlayerControls({ player, isLive, onFullscreen }: Props) {
+export function PlayerControls({
+  player,
+  isLive,
+  isFullscreen = false,
+  onFullscreen,
+  onOpenSettings,
+  qualityLabel,
+}: Props) {
   const { isPlaying } = useEvent(player, 'playingChange', { isPlaying: player.playing });
   const { currentTime, bufferedPosition } = useEvent(player, 'timeUpdate', {
     currentTime: player.currentTime,
@@ -145,15 +157,36 @@ export function PlayerControls({ player, isLive, onFullscreen }: Props) {
                 </ThemedText>
               </ThemedText>
             )}
-            {onFullscreen ? (
-              <Pressable
-                onPress={onFullscreen}
-                hitSlop={12}
-                accessibilityRole="button"
-                accessibilityLabel="Vollbild">
-                <MaterialIcons name="fullscreen" size={28} color="#fff" />
-              </Pressable>
-            ) : null}
+            <View style={styles.rightButtons}>
+              {onOpenSettings ? (
+                <Pressable
+                  onPress={onOpenSettings}
+                  hitSlop={10}
+                  style={styles.settings}
+                  accessibilityRole="button"
+                  accessibilityLabel="Qualität">
+                  <MaterialIcons name="settings" size={22} color="#fff" />
+                  {qualityLabel ? (
+                    <ThemedText type="smallBold" style={[styles.white, styles.qualityLabel]}>
+                      {qualityLabel}
+                    </ThemedText>
+                  ) : null}
+                </Pressable>
+              ) : null}
+              {onFullscreen ? (
+                <Pressable
+                  onPress={onFullscreen}
+                  hitSlop={12}
+                  accessibilityRole="button"
+                  accessibilityLabel={isFullscreen ? 'Vollbild beenden' : 'Vollbild'}>
+                  <MaterialIcons
+                    name={isFullscreen ? 'fullscreen-exit' : 'fullscreen'}
+                    size={28}
+                    color="#fff"
+                  />
+                </Pressable>
+              ) : null}
+            </View>
           </View>
         </View>
       ) : null}
@@ -280,6 +313,19 @@ const styles = StyleSheet.create({
   },
   dim: {
     color: 'rgba(255,255,255,0.75)',
+  },
+  rightButtons: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.four,
+  },
+  settings: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+  },
+  qualityLabel: {
+    fontSize: 12,
   },
   liveBadge: {
     flexDirection: 'row',
