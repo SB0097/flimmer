@@ -1,5 +1,6 @@
 import { Pressable, ScrollView, StyleSheet, Switch, View } from 'react-native';
 
+import { MiniPlayer } from '@/components/mini-player';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { Spacing } from '@/constants/theme';
@@ -39,6 +40,20 @@ export default function SettingsScreen() {
             value={playback.background}
             onValueChange={(background) => playbackSettings.update({ background })}
             accessibilityLabel="Im Hintergrund weiterspielen"
+          />
+        </View>
+        <View style={styles.row}>
+          <View style={styles.flex}>
+            <ThemedText>Bild-im-Bild</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              Verlässt du die App während eines Videos, läuft es in einem kleinen Fenster über
+              anderen Apps weiter. Ist das aus, läuft nur der Ton weiter (wenn oben eingeschaltet).
+            </ThemedText>
+          </View>
+          <Switch
+            value={playback.pip}
+            onValueChange={(pip) => playbackSettings.update({ pip })}
+            accessibilityLabel="Bild-im-Bild"
           />
         </View>
 
@@ -89,6 +104,7 @@ export default function SettingsScreen() {
           </ThemedText>
         </Pressable>
       </ScrollView>
+      <MiniPlayer />
     </ThemedView>
   );
 }

@@ -3,6 +3,7 @@ import { useRouter } from 'expo-router';
 import { Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { MiniPlayer } from '@/components/mini-player';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { BottomTabInset, MaxContentWidth, Spacing } from '@/constants/theme';
@@ -27,6 +28,7 @@ export default function LibraryScreen() {
           <MaterialIcons name="chevron-right" size={22} color={theme.textSecondary} />
         </Pressable>
       </SafeAreaView>
+      <MiniPlayer />
     </ThemedView>
   );
 }
