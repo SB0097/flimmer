@@ -1,9 +1,17 @@
 import { useEvent } from 'expo';
 import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { StatusBar } from 'expo-status-bar';
-import { useVideoPlayer, VideoView } from 'expo-video';
+import { useVideoPlayer, VideoView, type VideoPlayer } from 'expo-video';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, View } from 'react-native';
+import {
+  ActivityIndicator,
+  BackHandler,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
@@ -11,15 +19,20 @@ import { ThemedView } from '@/components/themed-view';
 import { VideoCard } from '@/components/video-card';
 import { CommentsPanel } from '@/components/watch/comments-panel';
 import { PlayerControls } from '@/components/watch/player-controls';
+import { QualitySheet } from '@/components/watch/quality-sheet';
 import { VideoInfo } from '@/components/watch/video-info';
 import { Spacing } from '@/constants/theme';
+import { friendlyStreamError } from '@/lib/friendly-error';
+import { loadQualities, sourceForQuality, type QualityInfo } from '@/services/playback/quality';
 import {
   StreamUnavailableError,
   videoSource,
   type CommentsResult,
+  type PlaybackSource,
   type RelatedPage,
   type StreamAttempt,
   type StreamResult,
+  type VideoDetails,
   type VideoSummary,
   type WatchPage,
 } from '@/services/video-source';
@@ -27,7 +40,29 @@ import {
 type StreamState =
   | { kind: 'loading' }
   | { kind: 'ready'; result: StreamResult }
-  | { kind: 'error'; message: string; attempts: StreamAttempt[] };
+  | { kind: 'error'; error: unknown; attempts: StreamAttempt[] };
+
+async function playSource(
+  player: VideoPlayer,
+  source: PlaybackSource,
+  details?: VideoDetails,
+  startAt?: number,
+) {
+  await player.replaceAsync({
+    uri: source.uri,
+    contentType: source.contentType,
+    headers: source.headers,
+    metadata: details
+      ? {
+          title: details.title,
+          artist: details.channel.name,
+          artwork: details.thumbnails.at(-1)?.url,
+        }
+      : undefined,
+  });
+  if (startAt && startAt > 1) player.seekBy(startAt - player.currentTime);
+  player.play();
+}
 
 export default function WatchScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -39,8 +74,11 @@ export default function WatchScreen() {
   const [attempt, setAttempt] = useState(0);
   const [comments, setComments] = useState<CommentsResult | null>();
   const [showComments, setShowComments] = useState(false);
+  const [qualities, setQualities] = useState<QualityInfo>();
+  const [quality, setQuality] = useState<number>();
+  const [showQuality, setShowQuality] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
 
-  const videoRef = useRef<VideoView>(null);
   const player = useVideoPlayer(null, (p) => {
     p.staysActiveInBackground = true;
     p.showNowPlayingNotification = true;
@@ -49,15 +87,19 @@ export default function WatchScreen() {
   const { status, error: playerError } = useEvent(player, 'statusChange', {
     status: player.status,
   });
+  const { videoTrack } = useEvent(player, 'videoTrackChange', { videoTrack: player.videoTrack });
 
-  // Beim Wechsel zu einem anderen Video (neue Seite im Stapel) dieses pausieren
+  // Beim Verlassen der Seite pausieren und zurück ins Hochformat
   useFocusEffect(
     useCallback(() => {
-      return () => player.pause();
+      return () => {
+        player.pause();
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+      };
     }, [player]),
   );
 
-  // Stream und Seitendaten parallel laden
+  // Stream, Seitendaten und Kommentare parallel laden
   useEffect(() => {
     let cancelled = false;
 
@@ -66,25 +108,16 @@ export default function WatchScreen() {
         const result = await videoSource.getStreams(id);
         if (cancelled) return;
         setStream({ kind: 'ready', result });
-        const { source, details } = result;
-        await player.replaceAsync({
-          uri: source.uri,
-          contentType: source.contentType,
-          headers: source.headers,
-          metadata: details
-            ? {
-                title: details.title,
-                artist: details.channel.name,
-                artwork: details.thumbnails.at(-1)?.url,
-              }
-            : undefined,
-        });
-        if (!cancelled) player.play();
+        setQuality(undefined);
+        setQualities(undefined);
+        await playSource(player, result.source, result.details);
+        const info = await loadQualities(result.source).catch(() => undefined);
+        if (!cancelled) setQualities(info);
       } catch (e) {
         if (cancelled) return;
         setStream({
           kind: 'error',
-          message: e instanceof Error ? e.message : String(e),
+          error: e,
           attempts: e instanceof StreamUnavailableError ? e.attempts : [],
         });
       }
@@ -142,12 +175,59 @@ export default function WatchScreen() {
   }, [id]);
 
   const details = page?.details ?? (stream.kind === 'ready' ? stream.result.details : undefined);
+
+  const chooseQuality = useCallback(
+    async (height: number | undefined) => {
+      setShowQuality(false);
+      if (stream.kind !== 'ready' || !qualities || height === quality) return;
+      setQuality(height);
+      const position = player.currentTime;
+      const source = await sourceForQuality(stream.result.source, qualities, height, id);
+      await playSource(player, source, details, position);
+    },
+    [stream, qualities, quality, player, id, details],
+  );
+
+  // Eigenes Vollbild: Querformat, nur das Video
+  const setFullscreen = useCallback(async (on: boolean) => {
+    setIsFullscreen(on);
+    await ScreenOrientation.lockAsync(
+      on
+        ? ScreenOrientation.OrientationLock.LANDSCAPE
+        : ScreenOrientation.OrientationLock.PORTRAIT_UP,
+    ).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!isFullscreen) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      setFullscreen(false);
+      return true;
+    });
+    return () => sub.remove();
+  }, [isFullscreen, setFullscreen]);
+
   const attempts =
     stream.kind === 'ready'
       ? stream.result.attempts
       : stream.kind === 'error'
         ? stream.attempts
         : [];
+
+  // Fehler: entweder beim Ermitteln des Streams oder beim Abspielen
+  const failure =
+    stream.kind === 'error'
+      ? friendlyStreamError(stream.error, stream.attempts)
+      : stream.kind === 'ready' && status === 'error'
+        ? friendlyStreamError(playerError?.message ?? playerError)
+        : undefined;
+
+  const qualityLabel =
+    quality !== undefined
+      ? qualities?.options.find((o) => o.height === quality)?.label
+      : videoTrack?.size?.height
+        ? `Auto · ${videoTrack.size.height}p`
+        : 'Auto';
 
   const diagnostics = (
     <View style={styles.diagnostics}>
@@ -159,8 +239,19 @@ export default function WatchScreen() {
         </ThemedText>
       ) : null}
       <ThemedText type="code">Player-Status: {status}</ThemedText>
+      {videoTrack?.size ? (
+        <ThemedText type="code">
+          Spur: {videoTrack.size.width}x{videoTrack.size.height}
+          {videoTrack.frameRate ? ` @ ${Math.round(videoTrack.frameRate)} fps` : ''}
+        </ThemedText>
+      ) : null}
       {status === 'error' && playerError ? (
         <ThemedText type="code">Player-Fehler: {playerError.message}</ThemedText>
+      ) : null}
+      {stream.kind === 'error' ? (
+        <ThemedText type="code">
+          Fehler: {stream.error instanceof Error ? stream.error.message : String(stream.error)}
+        </ThemedText>
       ) : null}
       {attempts.map((a, i) => (
         <ThemedText key={i} type="code">
@@ -171,69 +262,99 @@ export default function WatchScreen() {
   );
 
   return (
-    <ThemedView style={styles.container}>
-      <StatusBar style="light" />
-      <SafeAreaView edges={['top']} style={styles.videoSafeArea}>
-        <View style={styles.videoBox}>
+    <ThemedView style={[styles.container, isFullscreen && styles.fullscreenContainer]}>
+      <StatusBar style="light" hidden={isFullscreen} />
+      <SafeAreaView
+        edges={isFullscreen ? [] : ['top']}
+        style={[styles.videoSafeArea, isFullscreen && styles.flex]}>
+        <View style={isFullscreen ? styles.videoFullscreen : styles.videoBox}>
           {stream.kind === 'ready' ? (
             <>
               <VideoView
-                ref={videoRef}
                 player={player}
                 style={StyleSheet.absoluteFill}
                 nativeControls={false}
                 allowsPictureInPicture
                 contentFit="contain"
               />
-              <PlayerControls
-                player={player}
-                isLive={Boolean(details?.isLive)}
-                onFullscreen={() => videoRef.current?.enterFullscreen()}
-              />
+              {!failure ? (
+                <PlayerControls
+                  player={player}
+                  isLive={Boolean(details?.isLive)}
+                  isFullscreen={isFullscreen}
+                  onFullscreen={() => setFullscreen(!isFullscreen)}
+                  onOpenSettings={qualities ? () => setShowQuality(true) : undefined}
+                  qualityLabel={qualities ? qualityLabel : undefined}
+                />
+              ) : null}
             </>
           ) : null}
-          {stream.kind === 'loading' || (stream.kind === 'ready' && status === 'loading') ? (
-            <ActivityIndicator style={StyleSheet.absoluteFill} size="large" color="#fff" />
+          {!failure &&
+          (stream.kind === 'loading' || (stream.kind === 'ready' && status === 'loading')) ? (
+            <ActivityIndicator
+              style={StyleSheet.absoluteFill}
+              size="large"
+              color="#fff"
+              pointerEvents="none"
+            />
           ) : null}
-          {stream.kind === 'error' ? (
-            <View style={styles.errorBox}>
+          {failure ? (
+            <View style={[StyleSheet.absoluteFill, styles.errorBox]}>
               <ThemedText type="smallBold" style={styles.white}>
-                Video kann nicht abgespielt werden
+                {failure.title}
               </ThemedText>
-              <Pressable onPress={retry} style={styles.retry} accessibilityRole="button">
-                <ThemedText type="smallBold" style={styles.white}>
-                  Erneut versuchen
+              {failure.hint ? (
+                <ThemedText type="small" style={[styles.white, styles.center]}>
+                  {failure.hint}
                 </ThemedText>
-              </Pressable>
+              ) : null}
+              {failure.retryable ? (
+                <Pressable onPress={retry} style={styles.retry} accessibilityRole="button">
+                  <ThemedText type="smallBold" style={styles.white}>
+                    Erneut versuchen
+                  </ThemedText>
+                </Pressable>
+              ) : null}
             </View>
           ) : null}
         </View>
       </SafeAreaView>
 
-      <View style={styles.flex}>
-        <FlatList
-          data={related}
-          keyExtractor={(v) => v.id}
-          renderItem={({ item }) => <VideoCard video={item} />}
-          ListHeaderComponent={
-            <VideoInfo
-              details={details}
-              comments={comments}
-              onOpenComments={() => setShowComments(true)}
-              diagnostics={diagnostics}
-            />
-          }
-          onEndReached={loadMore}
-          onEndReachedThreshold={1.5}
-        />
-        {showComments ? (
-          <CommentsPanel
-            videoId={id}
-            initial={comments ?? undefined}
-            onClose={() => setShowComments(false)}
+      {!isFullscreen ? (
+        <View style={styles.flex}>
+          <FlatList
+            data={related}
+            keyExtractor={(v) => v.id}
+            renderItem={({ item }) => <VideoCard video={item} />}
+            ListHeaderComponent={
+              <VideoInfo
+                details={details}
+                comments={comments}
+                onOpenComments={() => setShowComments(true)}
+                diagnostics={diagnostics}
+              />
+            }
+            onEndReached={loadMore}
+            onEndReachedThreshold={1.5}
           />
-        ) : null}
-      </View>
+          {showComments ? (
+            <CommentsPanel
+              videoId={id}
+              initial={comments ?? undefined}
+              onClose={() => setShowComments(false)}
+            />
+          ) : null}
+        </View>
+      ) : null}
+
+      <QualitySheet
+        visible={showQuality}
+        options={qualities?.options ?? []}
+        selected={quality}
+        autoHeight={quality === undefined ? videoTrack?.size?.height : undefined}
+        onSelect={chooseQuality}
+        onClose={() => setShowQuality(false)}
+      />
     </ThemedView>
   );
 }
@@ -241,6 +362,9 @@ export default function WatchScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  fullscreenContainer: {
+    backgroundColor: '#000',
   },
   flex: {
     flex: 1,
@@ -254,12 +378,20 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
     justifyContent: 'center',
   },
+  videoFullscreen: {
+    flex: 1,
+    backgroundColor: '#000',
+    justifyContent: 'center',
+  },
   errorBox: {
     alignItems: 'center',
-    gap: Spacing.three,
+    justifyContent: 'center',
+    gap: Spacing.two,
     padding: Spacing.three,
+    backgroundColor: '#000',
   },
   retry: {
+    marginTop: Spacing.two,
     borderRadius: 18,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
@@ -267,6 +399,9 @@ const styles = StyleSheet.create({
   },
   white: {
     color: '#fff',
+  },
+  center: {
+    textAlign: 'center',
   },
   diagnostics: {
     gap: Spacing.one,
