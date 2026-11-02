@@ -3,25 +3,29 @@ import { useEvent } from 'expo';
 import { Image } from 'expo-image';
 import { router, useIsFocused } from 'expo-router';
 import { useRef, type ComponentRef } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { PlayerVideo } from '@/components/player-video';
-import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
-import { useTheme } from '@/hooks/use-theme';
 import { setMiniPlayerFrame } from '@/services/playback/mini-frame';
 import { useNowPlaying } from '@/services/playback/now-playing';
 
-const HEIGHT = 64;
+/** Anteil der Bildschirmbreite, den das schwebende Fenster einnimmt (wie YouTube) */
+const WIDTH_FRACTION = 0.52;
+const MARGIN = Spacing.two;
 
 /**
- * Leiste über den Tabs, solange ein Video läuft und die Video-Seite nicht offen
- * ist: Bild, Titel, Play/Pause und Schließen. Tippen öffnet das Video wieder.
+ * Schwebendes Mini-Fenster unten rechts (wie bei YouTube), solange ein Video läuft
+ * und die Video-Seite nicht offen ist. Auf dem Video: oben links Play/Pause,
+ * oben rechts Schließen; Tippen auf das Video öffnet es wieder groß.
+ *
+ * Gehört als letztes Kind in einen Bildschirm-Container – es liegt absolut
+ * über dem Inhalt, direkt über der Tab-Leiste.
  */
 export function MiniPlayer() {
-  const theme = useTheme();
   const focused = useIsFocused();
-  const videoRef = useRef<ComponentRef<typeof View>>(null);
+  const { width: screenWidth } = useWindowDimensions();
+  const cardRef = useRef<ComponentRef<typeof View>>(null);
   const { player, videoId, stream, details, close } = useNowPlaying();
   const { isPlaying } = useEvent(player, 'playingChange', { isPlaying: player.playing });
   const { currentTime } = useEvent(player, 'timeUpdate', {
@@ -33,59 +37,56 @@ export function MiniPlayer() {
 
   if (!videoId) return null;
 
+  const width = Math.round(screenWidth * WIDTH_FRACTION);
+  const height = Math.round((width * 9) / 16);
   const duration = player.duration;
   const progress = !details?.isLive && duration > 0 ? Math.min(1, currentTime / duration) : 0;
   const thumbnail = details?.thumbnails.at(-1)?.url;
+  const title =
+    details?.title ?? (stream.kind === 'error' ? 'Wiedergabe fehlgeschlagen' : 'Lädt …');
 
   return (
-    <View style={[styles.bar, { backgroundColor: theme.backgroundElement }]}>
-      <Pressable
-        style={styles.main}
-        onPress={() => router.push({ pathname: '/watch/[id]', params: { id: videoId } })}
-        accessibilityRole="button"
-        accessibilityLabel="Video öffnen">
-        <View
-          ref={videoRef}
-          style={styles.video}
-          onLayout={() =>
-            videoRef.current?.measureInWindow((x, y, width, height) =>
-              setMiniPlayerFrame({ x, y, width, height }),
-            )
-          }>
-          {/* Das Videobild darf nur an einer Stelle hängen: auf der sichtbaren Seite */}
-          {focused && stream.kind === 'ready' ? (
-            <PlayerVideo style={StyleSheet.absoluteFill} />
-          ) : thumbnail ? (
-            <Image source={thumbnail} style={StyleSheet.absoluteFill} contentFit="cover" />
-          ) : null}
-        </View>
-        <View style={styles.texts}>
-          <ThemedText type="smallBold" numberOfLines={1}>
-            {details?.title ?? (stream.kind === 'error' ? 'Wiedergabe fehlgeschlagen' : 'Lädt …')}
-          </ThemedText>
-          {details ? (
-            <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
-              {details.channel.name}
-            </ThemedText>
-          ) : null}
-        </View>
-      </Pressable>
+    <View
+      ref={cardRef}
+      // Unsichtbar, solange die Video-Seite darüber liegt: Beim Runterziehen gibt es
+      // sonst ein zweites Bild. Gemessen wird trotzdem (Ziel der Animation).
+      style={[styles.card, { width, height }, !focused && styles.hidden]}
+      pointerEvents={focused ? 'auto' : 'none'}
+      onLayout={() =>
+        cardRef.current?.measureInWindow((x, y, w, h) =>
+          setMiniPlayerFrame({ x, y, width: w, height: h }),
+        )
+      }>
+      {/* Das Videobild darf nur an einer Stelle hängen: auf der sichtbaren Seite */}
+      {focused && stream.kind === 'ready' ? (
+        <PlayerVideo style={StyleSheet.absoluteFill} />
+      ) : thumbnail ? (
+        <Image source={thumbnail} style={StyleSheet.absoluteFill} contentFit="cover" />
+      ) : null}
 
       <Pressable
+        style={StyleSheet.absoluteFill}
+        onPress={() => router.push({ pathname: '/watch/[id]', params: { id: videoId } })}
+        accessibilityRole="button"
+        accessibilityLabel={`Video öffnen: ${title}`}
+      />
+
+      {/* Wie YouTube: runde Knöpfe direkt auf dem Video – oben links Play/Pause, oben rechts Schließen */}
+      <Pressable
         onPress={() => (isPlaying ? player.pause() : player.play())}
-        style={styles.button}
-        hitSlop={8}
+        hitSlop={6}
+        style={[styles.round, styles.topLeft]}
         accessibilityRole="button"
         accessibilityLabel={isPlaying ? 'Pause' : 'Abspielen'}>
-        <MaterialIcons name={isPlaying ? 'pause' : 'play-arrow'} size={30} color={theme.text} />
+        <MaterialIcons name={isPlaying ? 'pause' : 'play-arrow'} size={24} color="#fff" />
       </Pressable>
       <Pressable
         onPress={close}
-        style={styles.button}
-        hitSlop={8}
+        hitSlop={6}
+        style={[styles.round, styles.topRight]}
         accessibilityRole="button"
         accessibilityLabel="Schließen">
-        <MaterialIcons name="close" size={26} color={theme.text} />
+        <MaterialIcons name="close" size={22} color="#fff" />
       </Pressable>
 
       <View style={styles.track}>
@@ -96,38 +97,45 @@ export function MiniPlayer() {
 }
 
 const styles = StyleSheet.create({
-  bar: {
-    alignSelf: 'stretch',
-    height: HEIGHT,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingRight: Spacing.two,
-  },
-  main: {
-    flex: 1,
-    height: '100%',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: Spacing.three,
-  },
-  video: {
-    height: '100%',
-    aspectRatio: 16 / 9,
+  card: {
+    position: 'absolute',
+    right: MARGIN,
+    bottom: MARGIN,
+    borderRadius: 12,
+    overflow: 'hidden',
     backgroundColor: '#000',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
   },
-  texts: {
-    flex: 1,
+  hidden: {
+    opacity: 0,
   },
-  button: {
-    padding: Spacing.two,
+  round: {
+    position: 'absolute',
+    top: Spacing.one,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+  },
+  topLeft: {
+    left: Spacing.one,
+  },
+  topRight: {
+    right: Spacing.one,
   },
   track: {
     position: 'absolute',
     left: 0,
     right: 0,
-    top: 0,
-    height: 2,
-    backgroundColor: 'rgba(128,128,128,0.3)',
+    bottom: 0,
+    height: 3,
+    backgroundColor: 'rgba(255,255,255,0.3)',
   },
   progress: {
     height: '100%',
