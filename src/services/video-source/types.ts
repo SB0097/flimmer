@@ -85,6 +85,31 @@ export class StreamUnavailableError extends Error {
   }
 }
 
+export interface Comment {
+  id: string;
+  author: { id?: string; name: string; avatar?: Thumbnail; isUploader: boolean };
+  text: string;
+  publishedText?: string;
+  likeCount?: number;
+  replyCount: number;
+  isPinned: boolean;
+  /** Vom Kanal mit Herz markiert */
+  isHearted: boolean;
+  loadReplies?: () => Promise<CommentsPage>;
+}
+
+export interface CommentsPage {
+  items: Comment[];
+  more?: () => Promise<CommentsPage>;
+}
+
+export interface CommentsResult extends CommentsPage {
+  /** z. B. „10.625“ */
+  countText?: string;
+}
+
+export type CommentSort = 'top' | 'newest';
+
 export interface SearchPage {
   items: VideoSummary[];
   /** Weiterblättern; `undefined`, wenn es keine weiteren Ergebnisse gibt */
@@ -96,4 +121,5 @@ export interface VideoSource {
   search(query: string): Promise<SearchPage>;
   getStreams(id: string): Promise<StreamResult>;
   getWatchPage(id: string): Promise<WatchPage>;
+  getComments(id: string, sort: CommentSort): Promise<CommentsResult>;
 }
