@@ -9,6 +9,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { VideoCard } from '@/components/video-card';
+import { PlayerControls } from '@/components/watch/player-controls';
 import { VideoInfo } from '@/components/watch/video-info';
 import { Spacing } from '@/constants/theme';
 import {
@@ -35,9 +36,11 @@ export default function WatchScreen() {
   const loadingMore = useRef(false);
   const [attempt, setAttempt] = useState(0);
 
+  const videoRef = useRef<VideoView>(null);
   const player = useVideoPlayer(null, (p) => {
     p.staysActiveInBackground = true;
     p.showNowPlayingNotification = true;
+    p.timeUpdateEventInterval = 0.5;
   });
   const { status, error: playerError } = useEvent(player, 'statusChange', {
     status: player.status,
@@ -159,13 +162,21 @@ export default function WatchScreen() {
       <SafeAreaView edges={['top']} style={styles.videoSafeArea}>
         <View style={styles.videoBox}>
           {stream.kind === 'ready' ? (
-            <VideoView
-              player={player}
-              style={StyleSheet.absoluteFill}
-              nativeControls
-              allowsPictureInPicture
-              contentFit="contain"
-            />
+            <>
+              <VideoView
+                ref={videoRef}
+                player={player}
+                style={StyleSheet.absoluteFill}
+                nativeControls={false}
+                allowsPictureInPicture
+                contentFit="contain"
+              />
+              <PlayerControls
+                player={player}
+                isLive={Boolean(details?.isLive)}
+                onFullscreen={() => videoRef.current?.enterFullscreen()}
+              />
+            </>
           ) : null}
           {stream.kind === 'loading' || (stream.kind === 'ready' && status === 'loading') ? (
             <ActivityIndicator style={StyleSheet.absoluteFill} size="large" color="#fff" />
