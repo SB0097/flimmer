@@ -11,6 +11,7 @@ import {
   type VideoSource,
   type VideoSummary,
 } from '../types';
+import { applyClientOverrides } from './client-overrides';
 import { evaluatePlayerScript } from './evaluator';
 import { planSource } from './select-source';
 
@@ -20,12 +21,14 @@ type Client = Types.InnerTubeClient;
  * Reihenfolge der InnerTube-Clients beim Abrufen der Streams.
  *
  * Stand 11/2026 (getestet über einen deutschen Heimanschluss):
- * - IOS: normale Videos mit unverschlüsselten Einzelformaten → selbst erzeugtes DASH.
- *   Für Livestreams liefert IOS aber kein HLS-/DASH-Manifest.
- * - ANDROID: liefert für Livestreams fertige HLS-/DASH-Manifeste.
- * - VISIONOS, ANDROID_VR, TV: verlangen derzeit einen Login (Bot-Schutz), bleiben als Reserve.
+ * - VISIONOS (Version siehe client-overrides): fertiges HLS-Manifest für normale Videos
+ *   und Livestreams, vollständig ladbar, bis 1080p. Voraussetzung: eine von YouTube
+ *   abgerufene Sitzung (visitorData), keine lokal erzeugte.
+ * - ANDROID, ANDROID_VR: HLS-Manifeste für Livestreams (Reserve).
+ * - IOS: Einzelformate sind nur am Anfang ladbar (danach HTTP 403 ohne PoToken),
+ *   daher nur noch letzter Ausweg.
  */
-export const DEFAULT_CLIENTS: Client[] = ['IOS', 'ANDROID', 'VISIONOS', 'ANDROID_VR', 'TV', 'WEB'];
+export const DEFAULT_CLIENTS: Client[] = ['VISIONOS', 'ANDROID', 'ANDROID_VR', 'IOS'];
 
 export interface YouTubeJsOptions {
   clients?: Client[];
@@ -45,15 +48,15 @@ export class YouTubeJsSource implements VideoSource {
   private getInnertube(): Promise<Innertube> {
     if (!this.innertube) {
       Platform.shim.eval = evaluatePlayerScript;
-      this.innertube = Innertube.create({
-        generate_session_locally: true,
-        retrieve_player: true,
-        lang: 'de',
-        location: 'DE',
-      }).catch((error: unknown) => {
-        this.innertube = undefined; // beim nächsten Versuch neu starten
-        throw error;
-      });
+      applyClientOverrides();
+      const options = { retrieve_player: true, lang: 'de', location: 'DE' } as const;
+      this.innertube = Innertube.create({ ...options, generate_session_locally: false })
+        // Fällt der Abruf der Sitzung aus, lokal erzeugen (einige Clients verweigern dann aber)
+        .catch(() => Innertube.create({ ...options, generate_session_locally: true }))
+        .catch((error: unknown) => {
+          this.innertube = undefined; // beim nächsten Versuch neu starten
+          throw error;
+        });
     }
     return this.innertube;
   }
