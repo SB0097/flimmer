@@ -1,11 +1,11 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useEvent } from 'expo';
-import { Image } from 'expo-image';
 import { router, useIsFocused } from 'expo-router';
 import { useEffect, useRef, type ComponentRef } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { PlayerVideo } from '@/components/player-video';
+import { VideoThumbnail } from '@/components/video-thumbnail';
 import { Spacing } from '@/constants/theme';
 import { setMiniPlayerFrame } from '@/services/playback/mini-frame';
 import { useNowPlaying } from '@/services/playback/now-playing';
@@ -56,7 +56,6 @@ export function MiniPlayer() {
   const height = Math.round((width * 9) / 16);
   const duration = player.duration;
   const progress = !details?.isLive && duration > 0 ? Math.min(1, currentTime / duration) : 0;
-  const thumbnail = details?.thumbnails.at(-1)?.url;
   const title =
     details?.title ?? (stream.kind === 'error' ? 'Wiedergabe fehlgeschlagen' : 'Lädt …');
 
@@ -71,9 +70,14 @@ export function MiniPlayer() {
       {/* Das Videobild darf nur an einer Stelle hängen: auf der sichtbaren Seite */}
       {focused && stream.kind === 'ready' ? (
         <PlayerVideo style={StyleSheet.absoluteFill} />
-      ) : thumbnail ? (
-        <Image source={thumbnail} style={StyleSheet.absoluteFill} contentFit="cover" />
-      ) : null}
+      ) : (
+        <VideoThumbnail
+          key={videoId}
+          videoId={videoId}
+          thumbnails={details?.thumbnails}
+          style={StyleSheet.absoluteFill}
+        />
+      )}
 
       <Pressable
         style={StyleSheet.absoluteFill}

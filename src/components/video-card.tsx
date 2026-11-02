@@ -3,14 +3,11 @@ import { Link, router } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { VideoThumbnail } from '@/components/video-thumbnail';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { formatDuration } from '@/lib/format';
 import type { VideoSummary } from '@/services/video-source';
-
-function bestThumbnail(video: VideoSummary) {
-  return [...video.thumbnails].sort((a, b) => b.width - a.width)[0]?.url;
-}
 
 /** Video-Kachel im YouTube-Stil: großes Vorschaubild, darunter Titel und Kanal */
 export function VideoCard({ video }: { video: VideoSummary }) {
@@ -24,11 +21,11 @@ export function VideoCard({ video }: { video: VideoSummary }) {
       <Link href={{ pathname: '/watch/[id]', params: { id: video.id } }} asChild>
         <Pressable accessibilityRole="button" accessibilityLabel={video.title}>
           <View>
-            <Image
-              source={bestThumbnail(video)}
+            <VideoThumbnail
+              key={video.id}
+              videoId={video.id}
+              thumbnails={video.thumbnails}
               style={[styles.thumbnail, { backgroundColor: theme.backgroundElement }]}
-              contentFit="cover"
-              transition={150}
             />
             {video.isLive ? (
               <View style={[styles.badge, styles.live]}>
