@@ -2,12 +2,14 @@ import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useEvent } from 'expo';
 import { Image } from 'expo-image';
 import { router, useIsFocused } from 'expo-router';
+import { useRef, type ComponentRef } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { PlayerVideo } from '@/components/player-video';
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { setMiniPlayerFrame } from '@/services/playback/mini-frame';
 import { useNowPlaying } from '@/services/playback/now-playing';
 
 const HEIGHT = 64;
@@ -19,6 +21,7 @@ const HEIGHT = 64;
 export function MiniPlayer() {
   const theme = useTheme();
   const focused = useIsFocused();
+  const videoRef = useRef<ComponentRef<typeof View>>(null);
   const { player, videoId, stream, details, close } = useNowPlaying();
   const { isPlaying } = useEvent(player, 'playingChange', { isPlaying: player.playing });
   const { currentTime } = useEvent(player, 'timeUpdate', {
@@ -41,7 +44,14 @@ export function MiniPlayer() {
         onPress={() => router.push({ pathname: '/watch/[id]', params: { id: videoId } })}
         accessibilityRole="button"
         accessibilityLabel="Video öffnen">
-        <View style={styles.video}>
+        <View
+          ref={videoRef}
+          style={styles.video}
+          onLayout={() =>
+            videoRef.current?.measureInWindow((x, y, width, height) =>
+              setMiniPlayerFrame({ x, y, width, height }),
+            )
+          }>
           {/* Das Videobild darf nur an einer Stelle hängen: auf der sichtbaren Seite */}
           {focused && stream.kind === 'ready' ? (
             <PlayerVideo style={StyleSheet.absoluteFill} />

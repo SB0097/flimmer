@@ -38,6 +38,8 @@ interface Props {
   qualityLabel?: string;
   /** SponsorBlock-Segmente für farbige Markierungen im Fortschrittsbalken */
   segments?: Segment[];
+  /** Während des Ladens nur der Ladekreis, kein Play-Knopf dahinter (wie YouTube) */
+  isLoading?: boolean;
 }
 
 /**
@@ -53,6 +55,7 @@ export function PlayerControls({
   onOpenSettings,
   qualityLabel,
   segments = [],
+  isLoading = false,
 }: Props) {
   const sponsorSettings = useSponsorSettings();
   const markers = segments.filter((seg) => sponsorSettings[seg.category] !== 'off');
@@ -134,13 +137,15 @@ export function PlayerControls({
       {visible && !seekHint ? (
         <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, styles.scrim]}>
           <View pointerEvents="box-none" style={styles.center}>
-            <Pressable
-              onPress={togglePlay}
-              style={styles.playButton}
-              accessibilityRole="button"
-              accessibilityLabel={isPlaying ? 'Pause' : 'Abspielen'}>
-              <MaterialIcons name={isPlaying ? 'pause' : 'play-arrow'} size={44} color="#fff" />
-            </Pressable>
+            {isLoading ? null : (
+              <Pressable
+                onPress={togglePlay}
+                style={styles.playButton}
+                accessibilityRole="button"
+                accessibilityLabel={isPlaying ? 'Pause' : 'Abspielen'}>
+                <MaterialIcons name={isPlaying ? 'pause' : 'play-arrow'} size={44} color="#fff" />
+              </Pressable>
+            )}
           </View>
 
           <View pointerEvents="box-none" style={styles.bottomRow}>
