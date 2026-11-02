@@ -1,4 +1,10 @@
-import type { Thumbnail, VideoSummary } from '../types';
+import type { ChannelRef, Thumbnail, VideoSummary } from '../types';
+
+interface ChannelText {
+  toString(): string;
+  endpoint?: { payload?: { browseId?: string } };
+  runs?: { endpoint?: { payload?: { browseId?: string } } }[];
+}
 
 /**
  * Minimal benötigte Struktur eines `LockupView`-Knotens von YouTube
@@ -16,7 +22,7 @@ export interface LockupLike {
     title?: { toString(): string } | null;
     image?: { avatar?: { image?: Thumbnail[] } | null } | null;
     metadata?: {
-      metadata_rows?: { metadata_parts?: { text?: { toString(): string } | null }[] }[];
+      metadata_rows?: { metadata_parts?: { text?: ChannelText | null }[] }[];
     } | null;
   } | null;
 }
@@ -37,7 +43,10 @@ function rowTexts(lockup: LockupLike): string[][] {
 }
 
 /** Wandelt einen LockupView in eine Video-Kachel um; `undefined` bei Playlists, Mixen usw. */
-export function lockupToSummary(lockup: LockupLike): VideoSummary | undefined {
+export function lockupToSummary(
+  lockup: LockupLike,
+  channel?: ChannelRef,
+): VideoSummary | undefined {
   if (lockup.content_type !== 'VIDEO' || !lockup.content_id) return undefined;
 
   const badges = (lockup.content_image?.overlays ?? []).flatMap((o) => o.badges ?? []);
@@ -48,17 +57,25 @@ export function lockupToSummary(lockup: LockupLike): VideoSummary | undefined {
     ? undefined
     : badges.map((b) => parseDurationText(b.text)).find((d) => d !== undefined);
 
-  const [channelRow = [], statsRow = []] = rowTexts(lockup);
+  const rows = rowTexts(lockup);
+  const [channelRow = [], statsRow = []] = channel && rows.length === 1 ? [[], rows[0]] : rows;
   const [rawViews, publishedText] = statsRow;
   // YouTube liefert in Vorschlägen oft nur die Zahl („407.785“, „4 Mio.“)
   const viewCountText =
     rawViews && !/[A-Za-zÄÖÜäöü]{4,}/.test(rawViews) ? `${rawViews} Aufrufe` : rawViews;
   const avatar = lockup.metadata?.image?.avatar?.image?.[0];
+  const channelText = lockup.metadata?.metadata?.metadata_rows?.[0]?.metadata_parts?.[0]?.text;
+  const channelId =
+    channelText?.endpoint?.payload?.browseId ??
+    channelText?.runs
+      ?.map((run) => run.endpoint?.payload?.browseId)
+      .find((id) => id?.startsWith('UC')) ??
+    '';
 
   return {
     id: lockup.content_id,
     title: lockup.metadata?.title?.toString() ?? '',
-    channel: { id: '', name: channelRow[0] ?? '', avatar },
+    channel: channel ?? { id: channelId, name: channelRow[0] ?? '', avatar },
     durationSeconds,
     viewCountText,
     publishedText,

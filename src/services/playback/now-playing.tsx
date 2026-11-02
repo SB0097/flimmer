@@ -12,6 +12,8 @@ import {
 
 import type { Segment } from '@/lib/segments';
 import { sleepRemainingMs, sleepStep, type SleepTimer } from '@/lib/sleep-timer';
+import { library } from '@/services/library/store';
+import { usePlaybackHistory } from '@/services/library/use-playback-history';
 import { applyPlaybackSettings } from '@/services/playback/background';
 import {
   playSource,
@@ -78,21 +80,11 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
 
   const [sleepTimer, setSleepTimerState] = useState<SleepTimer>();
   const currentId = useRef<string | undefined>(undefined);
-  const positions = useRef(new Map<string, number>());
 
   // Einstellung „Im Hintergrund weiterspielen“ live übernehmen
   useEffect(() => {
     applyPlaybackSettings(player, playback);
   }, [player, playback]);
-
-  /** Position des laufenden Videos merken, damit es später dort weitergeht */
-  const rememberPosition = useCallback(() => {
-    const id = currentId.current;
-    if (!id) return;
-    const position = resumablePosition(player.currentTime, player.duration);
-    if (position === undefined) positions.current.delete(id);
-    else positions.current.set(id, position);
-  }, [player]);
 
   const reset = useCallback(() => {
     setStream({ kind: 'loading' });
@@ -104,23 +96,21 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
   const open = useCallback(
     (id: string) => {
       if (currentId.current === id) return;
-      rememberPosition();
       currentId.current = id;
       reset();
       setPlayerVolume(player, 1);
       setSleepTimerState((t) => (t?.kind === 'endOfVideo' ? undefined : t));
       setVideoId(id);
     },
-    [player, rememberPosition, reset],
+    [player, reset],
   );
 
   const close = useCallback(() => {
-    rememberPosition();
     currentId.current = undefined;
     stopPlayback(player);
     reset();
     setVideoId(undefined);
-  }, [player, rememberPosition, reset]);
+  }, [player, reset]);
 
   const setSleepTimer = useCallback(
     (choice: number | 'endOfVideo' | undefined) => {
@@ -194,8 +184,14 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
       try {
         const result = await videoSource.getStreams(id);
         if (cancelled) return;
+        const history = library.get().history.find((h) => h.video.id === id);
+        const savedPosition =
+          history && !result.details?.isLive
+            ? resumablePosition(history.position, result.details?.durationSeconds ?? 0)
+            : undefined;
+        await playSource(player, result.source, result.details, savedPosition);
+        if (cancelled) return;
         setStream({ kind: 'ready', result });
-        await playSource(player, result.source, result.details, positions.current.get(id));
         const info = await loadQualities(result.source).catch(() => undefined);
         if (!cancelled) setQualities(info);
       } catch (e) {
@@ -221,6 +217,7 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
   }, [videoId, attempt, player]);
 
   const details = stream.kind === 'ready' ? stream.result.details : undefined;
+  usePlaybackHistory(player, details);
 
   const chooseQuality = useCallback(
     async (height: number | undefined) => {

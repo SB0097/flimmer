@@ -39,6 +39,22 @@ describe('parseDurationText', () => {
 });
 
 describe('lockupToSummary', () => {
+  it('liest Aufrufe und Datum auf einer Kanalseite ohne zusätzliche Kanalzeile', () => {
+    const node = lockup();
+    node.metadata!.metadata!.metadata_rows!.shift();
+    const summary = lockupToSummary(node, { id: 'UC-test', name: 'Testkanal' });
+    expect(summary?.channel.id).toBe('UC-test');
+    expect(summary?.viewCountText).toBe('4 Mio. Aufrufe');
+    expect(summary?.publishedText).toBe('vor 7 Monaten');
+  });
+  it('liest die Kanal-ID aus verlinkten Metadaten', () => {
+    const node = lockup();
+    node.metadata!.metadata!.metadata_rows![0].metadata_parts![0].text = {
+      toString: () => 'Testkanal',
+      runs: [{ endpoint: { payload: { browseId: 'UC-test' } } }],
+    };
+    expect(lockupToSummary(node)?.channel.id).toBe('UC-test');
+  });
   it('liest ein normales Video', () => {
     expect(lockupToSummary(lockup())).toEqual({
       id: 'UDTmUzu05BE',
