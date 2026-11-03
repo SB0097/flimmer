@@ -10,7 +10,7 @@ export interface QualityInfo {
 
 /** Lädt die HLS-Master-Playlist und liest die verfügbaren Qualitäten aus. */
 export async function loadQualities(source: PlaybackSource): Promise<QualityInfo | undefined> {
-  if (source.contentType !== 'hls') return undefined;
+  if (source.contentType !== 'hls' || source.via.startsWith('Download')) return undefined;
   const response = await fetch(source.uri, { headers: source.headers });
   if (!response.ok) return undefined;
   const master = await response.text();

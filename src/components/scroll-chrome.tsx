@@ -29,11 +29,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
 
 import { MiniPlayer } from '@/components/mini-player';
+import { TabBarHeight } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { advanceChrome, boundedScrollY, settledChrome } from '@/lib/scroll-chrome';
 import { setMiniPlayerFrame, type Frame } from '@/services/playback/mini-frame';
 
-const TAB_HEIGHT = 64;
+const TAB_HEIGHT = TabBarHeight;
 const ANIMATION = { duration: 200 };
 const ChromeContext = createContext<{
   progress: SharedValue<number>;

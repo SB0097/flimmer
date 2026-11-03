@@ -14,7 +14,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { Spacing } from '@/constants/theme';
+import { Brand, Spacing } from '@/constants/theme';
 import { formatDuration } from '@/lib/format';
 import { CATEGORY_INFO, type Segment } from '@/lib/segments';
 import { useSponsorSettings } from '@/services/settings/sponsor-settings';
@@ -27,7 +27,6 @@ import {
 } from '@/lib/tap-seek';
 
 const HIDE_AFTER_MS = 3000;
-const RED = '#FF0033';
 
 interface Props {
   player: VideoPlayer;
@@ -425,7 +424,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: RED,
+    backgroundColor: Brand.playback,
   },
   seekHint: {
     position: 'absolute',
@@ -471,7 +470,7 @@ const styles = StyleSheet.create({
     left: 0,
     top: 0,
     bottom: 0,
-    backgroundColor: RED,
+    backgroundColor: Brand.playback,
   },
   seekMarker: {
     position: 'absolute',
@@ -486,6 +485,6 @@ const styles = StyleSheet.create({
     height: 12,
     marginLeft: -6,
     borderRadius: 6,
-    backgroundColor: RED,
+    backgroundColor: Brand.playback,
   },
 });

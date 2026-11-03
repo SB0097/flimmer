@@ -27,7 +27,7 @@ function AppTabNavigator() {
       screenOptions={{
         headerShown: false,
         tabBarHideOnKeyboard: true,
-        tabBarActiveTintColor: theme.text,
+        tabBarActiveTintColor: theme.accent,
         tabBarInactiveTintColor: theme.textSecondary,
         tabBarLabelPosition: 'below-icon',
         tabBarStyle: {
@@ -36,17 +36,18 @@ function AppTabNavigator() {
           borderTopWidth: 0,
           backgroundColor: theme.background,
         },
-        tabBarItemStyle: { paddingTop: 6 },
+        tabBarItemStyle: { paddingTop: 4, paddingBottom: 2 },
+        tabBarLabelStyle: { fontSize: 11, lineHeight: 14, fontWeight: '600' },
       }}>
       <Tabs.Screen
         name="index"
         options={{
           title: 'Start',
-          tabBarIcon: ({ focused, size }) => (
+          tabBarIcon: ({ focused }) => (
             <MaterialIcons
               name="home"
-              color={focused ? theme.text : theme.textSecondary}
-              size={size}
+              color={focused ? theme.accent : theme.textSecondary}
+              size={22}
             />
           ),
         }}
@@ -55,11 +56,11 @@ function AppTabNavigator() {
         name="library"
         options={{
           title: 'Bibliothek',
-          tabBarIcon: ({ focused, size }) => (
+          tabBarIcon: ({ focused }) => (
             <MaterialIcons
               name="video-library"
-              color={focused ? theme.text : theme.textSecondary}
-              size={size}
+              color={focused ? theme.accent : theme.textSecondary}
+              size={22}
             />
           ),
         }}

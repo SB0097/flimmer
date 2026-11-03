@@ -10,7 +10,7 @@ import { ThemedView } from '@/components/themed-view';
 import { VideoCard } from '@/components/video-card';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { library } from '@/services/library/store';
+import { library, useLibrary } from '@/services/library/store';
 import {
   videoSource,
   type ChannelPage,
@@ -24,8 +24,10 @@ export default function ChannelScreen() {
 }
 
 function ChannelContents({ id }: { id: string }) {
+  const { subscriptions } = useLibrary();
   const theme = useTheme();
   const [page, setPage] = useState<ChannelPage>();
+  const channel = page?.channel ?? subscriptions.find((saved) => saved.channel.id === id)?.channel;
   const [items, setItems] = useState<VideoSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
@@ -91,7 +93,7 @@ function ChannelContents({ id }: { id: string }) {
 
   return (
     <ThemedView style={styles.flex}>
-      <Stack.Screen options={{ title: page?.channel.name ?? 'Kanal' }} />
+      <Stack.Screen options={{ title: channel?.name ?? 'Kanal' }} />
       <FlatList
         data={items}
         keyExtractor={(v) => v.id}
@@ -103,25 +105,25 @@ function ChannelContents({ id }: { id: string }) {
         onEndReachedThreshold={1}
         ListHeaderComponent={
           <View style={styles.header}>
-            {page ? (
+            {channel ? (
               <>
                 <View style={styles.row}>
-                  {page.channel.avatar ? (
-                    <Image source={page.channel.avatar.url} style={styles.avatar} />
+                  {channel.avatar ? (
+                    <Image source={channel.avatar.url} style={styles.avatar} />
                   ) : (
                     <View style={[styles.avatar, { backgroundColor: theme.backgroundElement }]} />
                   )}
                   <View style={styles.flex}>
-                    <ThemedText type="title">{page.channel.name}</ThemedText>
-                    {page.channel.subscriberCountText ? (
+                    <ThemedText type="title">{channel.name}</ThemedText>
+                    {channel.subscriberCountText ? (
                       <ThemedText type="small" themeColor="textSecondary">
-                        {page.channel.subscriberCountText}
+                        {channel.subscriberCountText}
                       </ThemedText>
                     ) : null}
                   </View>
                 </View>
-                <SubscribeButton channel={page.channel} />
-                {page.description ? (
+                <SubscribeButton channel={channel} />
+                {page?.description ? (
                   <ThemedText type="small" themeColor="textSecondary" numberOfLines={4}>
                     {page.description}
                   </ThemedText>

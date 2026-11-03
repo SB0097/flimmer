@@ -6,6 +6,8 @@ export interface HistoryEntry {
   position: number;
   watchedSeconds: number;
   completed: boolean;
+  /** Aus Takeout: gesehen, aber Dauer/Sehposition nicht bekannt. */
+  imported?: boolean;
 }
 
 export interface Favorite {
