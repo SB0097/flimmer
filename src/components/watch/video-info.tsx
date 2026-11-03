@@ -83,7 +83,9 @@ export function VideoInfo({ details, comments, onOpenComments, diagnostics }: Pr
       <View style={styles.chips}>
         <FavoriteButton video={details} />
         <SaveToPlaylistButton video={details} />
-        <DownloadButton video={details} />
+        <View style={styles.downloadAction}>
+          <DownloadButton video={details} />
+        </View>
       </View>
       <LibraryError />
 
@@ -199,6 +201,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: Spacing.two,
+  },
+  downloadAction: {
+    marginLeft: 'auto',
   },
   chip: {
     borderRadius: 18,
