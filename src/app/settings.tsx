@@ -37,6 +37,7 @@ export default function SettingsScreen() {
             </ThemedText>
           </View>
           <Switch
+            trackColor={{ false: theme.backgroundSelected, true: theme.accent }}
             value={playback.background}
             onValueChange={(background) => playbackSettings.update({ background })}
             accessibilityLabel="Im Hintergrund weiterspielen"
@@ -51,6 +52,7 @@ export default function SettingsScreen() {
             </ThemedText>
           </View>
           <Switch
+            trackColor={{ false: theme.backgroundSelected, true: theme.accent }}
             value={playback.pip}
             onValueChange={(pip) => playbackSettings.update({ pip })}
             accessibilityLabel="Bild-im-Bild"
@@ -81,13 +83,13 @@ export default function SettingsScreen() {
                     <Pressable
                       key={mode}
                       onPress={() => setCategoryMode(category, mode)}
-                      style={[styles.segment, active && { backgroundColor: theme.text }]}
+                      style={[styles.segment, active && { backgroundColor: theme.accentSurface }]}
                       accessibilityRole="button"
                       accessibilityState={{ selected: active }}
                       accessibilityLabel={`${info.label}: ${label}`}>
                       <ThemedText
                         type="smallBold"
-                        style={{ color: active ? theme.background : theme.text }}>
+                        style={{ color: active ? theme.accent : theme.text }}>
                         {label}
                       </ThemedText>
                     </Pressable>

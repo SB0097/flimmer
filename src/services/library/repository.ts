@@ -2,6 +2,7 @@ import type { ChannelRef, VideoSummary } from '@/services/video-source/types';
 import { playlistName } from '@/lib/playlists';
 
 import type { FeedCache, LibrarySnapshot, ProgressUpdate } from './types';
+import type { LibraryImport, ImportResult } from './import-types';
 
 /** Kleine Schnittstelle, damit dieselben Abfragen auch mit echtem SQLite testbar sind. */
 export interface LibraryDatabase {
@@ -33,6 +34,12 @@ export class LibraryRepository {
       );
       CREATE INDEX IF NOT EXISTS library_playlist_order ON library_playlist_videos (playlist_id, position);
     `);
+    if (
+      !db
+        .getAllSync<{ name: string }>('PRAGMA table_info(library_history)')
+        .some((c) => c.name === 'imported')
+    )
+      db.execSync('ALTER TABLE library_history ADD COLUMN imported INTEGER NOT NULL DEFAULT 0');
   }
 
   read(): LibrarySnapshot {
@@ -42,6 +49,7 @@ export class LibraryRepository {
       position: number;
       watched_seconds: number;
       completed: number;
+      imported: number;
     }>(
       `SELECT v.json, h.* FROM library_history h JOIN library_videos v ON v.id = h.video_id ORDER BY h.last_watched_at DESC`,
     );
@@ -74,6 +82,7 @@ export class LibraryRepository {
         position: h.position,
         watchedSeconds: h.watched_seconds,
         completed: Boolean(h.completed),
+        ...(h.imported ? { imported: true } : {}),
       })),
       favorites: favorites.map((f) => ({
         video: JSON.parse(f.json) as VideoSummary,
@@ -145,7 +154,7 @@ export class LibraryRepository {
         VALUES (?, ?, ?, ?, ?) ON CONFLICT(video_id) DO UPDATE SET
         last_watched_at = excluded.last_watched_at, position = excluded.position,
         watched_seconds = library_history.watched_seconds + excluded.watched_seconds,
-        completed = MAX(library_history.completed, excluded.completed)`,
+        completed = MAX(library_history.completed, excluded.completed), imported = 0`,
         video.id,
         now,
         Math.max(0, update.position),
@@ -176,6 +185,91 @@ export class LibraryRepository {
       }
       this.pruneVideos();
     });
+  }
+
+  /** Ergänzt atomar; existierende Positionen, Metadaten, Abos und Playlist-Reihenfolgen gewinnen. */
+  importData(batch: LibraryImport, now: number): ImportResult {
+    const result: ImportResult = { subscriptions: 0, history: 0, playlists: 0, videos: 0 };
+    const addedHistory: string[] = [];
+    this.db.withTransactionSync(() => {
+      for (const channel of batch.subscriptions) {
+        if (
+          this.db.getFirstSync(
+            'SELECT channel_id FROM library_subscriptions WHERE channel_id = ?',
+            channel.id,
+          )
+        )
+          continue;
+        this.db.runSync(
+          'INSERT INTO library_subscriptions (channel_id, json, subscribed_at) VALUES (?, ?, ?)',
+          channel.id,
+          JSON.stringify(channel),
+          now,
+        );
+        result.subscriptions++;
+      }
+      for (const item of batch.history) {
+        if (
+          this.db.getFirstSync(
+            'SELECT video_id FROM library_history WHERE video_id = ?',
+            item.video.id,
+          )
+        )
+          continue;
+        if (!this.db.getFirstSync('SELECT id FROM library_videos WHERE id = ?', item.video.id))
+          this.putVideo(item.video);
+        this.db.runSync(
+          'INSERT INTO library_history (video_id, last_watched_at, position, watched_seconds, completed, imported) VALUES (?, ?, 0, 0, 0, 1)',
+          item.video.id,
+          item.watchedAt,
+        );
+        addedHistory.push(item.video.id);
+      }
+      for (const list of batch.playlists) {
+        const id = `takeout:${list.key}`;
+        if (!this.db.getFirstSync('SELECT id FROM library_playlists WHERE id = ?', id)) {
+          this.db.runSync(
+            'INSERT INTO library_playlists (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)',
+            id,
+            playlistName(list.name),
+            now,
+            now,
+          );
+          result.playlists++;
+        }
+        let position = this.db.getFirstSync<{ next: number }>(
+          'SELECT COALESCE(MAX(position), -1) + 1 AS next FROM library_playlist_videos WHERE playlist_id = ?',
+          id,
+        )!.next;
+        for (const video of list.videos) {
+          if (
+            this.db.getFirstSync(
+              'SELECT video_id FROM library_playlist_videos WHERE playlist_id = ? AND video_id = ?',
+              id,
+              video.id,
+            )
+          )
+            continue;
+          if (!this.db.getFirstSync('SELECT id FROM library_videos WHERE id = ?', video.id))
+            this.putVideo(video);
+          this.db.runSync(
+            'INSERT INTO library_playlist_videos (playlist_id, video_id, position) VALUES (?, ?, ?)',
+            id,
+            video.id,
+            position++,
+          );
+          result.videos++;
+        }
+      }
+      this.db.execSync(
+        'DELETE FROM library_history WHERE video_id NOT IN (SELECT video_id FROM library_history ORDER BY last_watched_at DESC LIMIT 1000)',
+      );
+      this.pruneVideos();
+      result.history = addedHistory.filter((id) =>
+        this.db.getFirstSync('SELECT video_id FROM library_history WHERE video_id = ?', id),
+      ).length;
+    });
+    return result;
   }
 
   toggleSubscription(channel: ChannelRef, now: number): void {

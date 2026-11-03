@@ -6,7 +6,7 @@ import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { PlayerVideo } from '@/components/player-video';
 import { VideoThumbnail } from '@/components/video-thumbnail';
-import { Spacing } from '@/constants/theme';
+import { Brand, Spacing } from '@/constants/theme';
 import { playlistNeighbor } from '@/lib/playlists';
 import { setMiniPlayerFrame } from '@/services/playback/mini-frame';
 import { useNowPlaying } from '@/services/playback/now-playing';
@@ -186,6 +186,6 @@ const styles = StyleSheet.create({
   },
   progress: {
     height: '100%',
-    backgroundColor: '#FF0033',
+    backgroundColor: Brand.playback,
   },
 });

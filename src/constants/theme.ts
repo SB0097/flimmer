@@ -1,9 +1,14 @@
-/**
- * Below are the colors that are used in the app. The colors are defined in the light and dark mode.
- * There are many other ways to style your app. For example, [Nativewind](https://www.nativewind.dev/), [Tamagui](https://tamagui.dev/), [unistyles](https://unistyl.es/), etc.
- */
-
 import { Platform } from 'react-native';
+
+/** Petrol aus dem Flimmer-Logo; der hellere Ton bleibt über Videos gut sichtbar. */
+export const Brand = {
+  petrol: '#134E4A',
+  deep: '#042F2E',
+  playback: '#43AD9F',
+} as const;
+
+/** Höhe ohne Systemnavigation; Messung, Scrollen und Mini-Player teilen denselben Wert. */
+export const TabBarHeight = 52;
 
 export const Colors = {
   light: {
@@ -12,6 +17,9 @@ export const Colors = {
     backgroundElement: '#F0F0F3',
     backgroundSelected: '#E0E1E6',
     textSecondary: '#60646C',
+    accent: '#0F766E',
+    accentSurface: '#E1F2EE',
+    onAccent: '#FFFFFF',
   },
   dark: {
     text: '#ffffff',
@@ -19,6 +27,9 @@ export const Colors = {
     backgroundElement: '#212225',
     backgroundSelected: '#2E3135',
     textSecondary: '#B0B4BA',
+    accent: '#6BCABD',
+    accentSurface: '#143B35',
+    onAccent: '#042F2E',
   },
 } as const;
 
@@ -59,5 +70,5 @@ export const Spacing = {
   six: 64,
 } as const;
 
-export const BottomTabInset = Platform.select({ ios: 50, android: 80 }) ?? 0;
+export const BottomTabInset = TabBarHeight;
 export const MaxContentWidth = 800;
