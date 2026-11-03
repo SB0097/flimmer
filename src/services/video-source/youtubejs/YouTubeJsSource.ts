@@ -24,6 +24,7 @@ import { evaluatePlayerScript } from './evaluator';
 import { toComment, type CommentViewLike } from './comments';
 import { lockupToSummary, parseDurationText, type LockupLike } from './lockup';
 import { planSource } from './select-source';
+import { toCaptionTracks } from './captions';
 
 type Client = Types.InnerTubeClient;
 
@@ -131,7 +132,12 @@ export class YouTubeJsSource implements VideoSource {
     // Die Streams dieses Clients werden hier nicht verwendet.
     const info = await yt.getInfo(id, { client: 'WEB' });
     const page = toRelatedPage(info);
-    return { details: toWatchDetails(id, info), related: page.items, moreRelated: page.more };
+    return {
+      details: toWatchDetails(id, info),
+      related: page.items,
+      moreRelated: page.more,
+      captions: toCaptionTracks(id, info.captions?.caption_tracks, clientHeaders('WEB')),
+    };
   }
 
   async getComments(id: string, sort: CommentSort): Promise<CommentsResult> {
@@ -170,7 +176,12 @@ export class YouTubeJsSource implements VideoSource {
         }
 
         attempts.push({ via: client, ok: true, message: picked.message });
-        return { source: picked.source, details, attempts };
+        return {
+          source: picked.source,
+          details,
+          attempts,
+          captions: toCaptionTracks(id, info.captions?.caption_tracks, clientHeaders(client)),
+        };
       } catch (error) {
         attempts.push({ via: client, ok: false, message: errorMessage(error) });
       }

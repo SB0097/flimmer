@@ -1,11 +1,62 @@
 import type { VideoPlayer } from 'expo-video';
 import { AppState } from 'react-native';
 
-import { pauseIfPipDismissed, resumablePosition } from '../player-actions';
+import { pauseIfPipDismissed, playSource, resumablePosition } from '../player-actions';
 
 jest.mock('react-native', () => ({ AppState: { currentState: 'active' } }));
 
 const appState = AppState as { currentState: string };
+
+it('reicht Untertitel an Android durch und behält eine pausierte Position', async () => {
+  const player = {
+    replaceAsync: jest.fn(async () => {}),
+    currentTime: 0,
+    seekBy: jest.fn(),
+    play: jest.fn(),
+    pause: jest.fn(),
+  };
+  const externalSubtitles = [{ uri: 'file:///caption.vtt', language: 'en', label: 'English' }];
+  await playSource(
+    player as unknown as VideoPlayer,
+    { uri: 'https://video', contentType: 'hls', via: 'test', externalSubtitles },
+    undefined,
+    42,
+    { isCurrent: () => true, resume: false },
+  );
+  expect(player.replaceAsync).toHaveBeenCalledWith(expect.objectContaining({ externalSubtitles }));
+  expect(player.seekBy).toHaveBeenCalledWith(42);
+  expect(player.play).not.toHaveBeenCalled();
+  expect(player.pause).toHaveBeenCalled();
+});
+
+it('lässt eine überholte native Ersetzung weder suchen noch weiterspielen', async () => {
+  let release!: () => void;
+  const player = {
+    replaceAsync: jest.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    ),
+    currentTime: 0,
+    seekBy: jest.fn(),
+    play: jest.fn(),
+    pause: jest.fn(),
+  };
+  let current = true;
+  const pending = playSource(
+    player as unknown as VideoPlayer,
+    { uri: 'https://video', contentType: 'hls', via: 'test' },
+    undefined,
+    42,
+    { isCurrent: () => current, resume: true },
+  );
+  current = false;
+  release();
+  await pending;
+  expect(player.seekBy).not.toHaveBeenCalled();
+  expect(player.play).not.toHaveBeenCalled();
+});
 
 describe('resumablePosition', () => {
   it('merkt sich Positionen mitten im Video', () => {

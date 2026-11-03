@@ -1,7 +1,12 @@
-import type { VideoPlayer } from 'expo-video';
+import type { SubtitleTrack, VideoPlayer } from 'expo-video';
 import { AppState } from 'react-native';
 
 import type { PlaybackSource, VideoDetails } from '@/services/video-source';
+
+/** expo-video ist ein veränderliches natives Handle, kein React-Zustandsobjekt. */
+export function setPlayerSubtitle(player: VideoPlayer, track: SubtitleTrack | null) {
+  player.subtitleTrack = track;
+}
 
 /** Lädt eine Quelle in den Player und startet die Wiedergabe (optional ab `startAt` Sekunden) */
 export async function playSource(
@@ -9,12 +14,14 @@ export async function playSource(
   source: PlaybackSource,
   details?: VideoDetails,
   startAt?: number,
+  control?: { isCurrent(): boolean; resume: boolean },
 ) {
   player.showNowPlayingNotification = true;
   await player.replaceAsync({
     uri: source.uri,
     contentType: source.contentType,
     headers: source.headers,
+    ...(source.externalSubtitles ? { externalSubtitles: source.externalSubtitles } : {}),
     metadata: details
       ? {
           title: details.title,
@@ -23,8 +30,10 @@ export async function playSource(
         }
       : undefined,
   });
+  if (control && !control.isCurrent()) return;
   if (startAt && startAt > 1) player.seekBy(startAt - player.currentTime);
-  player.play();
+  if (control?.resume !== false) player.play();
+  else player.pause();
 }
 
 /** Beendet die Wiedergabe komplett; die Medien-Benachrichtigung verschwindet */

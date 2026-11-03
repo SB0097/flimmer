@@ -8,6 +8,7 @@ Werbefreier YouTube-Player für Android, gebaut mit Expo.
 - Lokale Bibliothek: Verlauf mit Sehpositionen, Favoriten und Kanal-Abos
 - Kanalseiten und eine persönliche „Für dich“-Startseite ohne Google-Login
 - Eigene Playlists mit sortierbaren Videos und fortlaufender Wiedergabe
+- Untertitel mit Sprachwahl, einschließlich automatisch erzeugter Spuren
 
 ## Bibliothek und Startseite
 
@@ -50,6 +51,21 @@ sie speichern Videoeinträge, keine heruntergeladenen Videodateien. Zum Abspiele
 eine Internetverbindung erforderlich.
 
 > 🚧 Frühe Entwicklungsphase
+
+## Untertitel
+
+Im Zahnrad-Menü des Players findest du **Untertitel**. Wähle eine verfügbare Sprache
+oder **Aus**. Automatisch erzeugte Spuren sind gekennzeichnet. Ohne verfügbare Spur
+zeigt das Menü einen Hinweis; Fehler beim Abruf lassen sich durch erneute Auswahl wiederholen.
+
+Untertitel werden erst bei Auswahl von YouTube geladen und als entbehrliche WebVTT-Datei
+im App-Cache gehalten. Der Android-Player zeigt sie auch im Vollbild und in Bild-im-Bild;
+die Auswahl bleibt beim Qualitätswechsel und im Mini-Player erhalten. Ein neues Video
+beginnt mit ausgeschalteten Untertiteln. Es gibt keine automatische Übersetzung und
+keinen Untertitel-Download für die Offline-Bibliothek.
+
+Die Android-Anbindung ergänzt `expo-video` per `patch-package` um externe WebVTT-Spuren.
+Deshalb erfordert diese Änderung einen neuen nativen Build; Expo Go reicht nicht aus.
 
 ## Tech-Stack
 

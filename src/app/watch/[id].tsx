@@ -1,6 +1,6 @@
 import { useEvent } from 'expo';
 import {
-  router,
+  useRouter,
   Stack,
   useFocusEffect,
   useIsFocused,
@@ -56,6 +56,7 @@ import {
 } from '@/services/video-source';
 
 export default function WatchScreen() {
+  const router = useRouter();
   const {
     id: routeId,
     from,
@@ -198,7 +199,7 @@ export default function WatchScreen() {
     for (let i = routes.length - 1; i >= 0 && routes[i].name === 'watch/[id]'; i--) count++;
     if (count > 0 && router.canDismiss()) router.dismiss(count);
     else router.replace('/');
-  }, [navigation]);
+  }, [navigation, router]);
 
   // Lage dieser Seite im Fenster – Bezugspunkt für die Mini-Player-Position
   const rootRef = useRef<ComponentRef<typeof View>>(null);
@@ -490,6 +491,17 @@ export default function WatchScreen() {
           quality={quality}
           autoHeight={quality === undefined ? videoTrack?.size?.height : undefined}
           onSelectQuality={chooseQuality}
+          captions={
+            stream.kind === 'ready' && stream.result.captions?.length
+              ? stream.result.captions
+              : page?.details.id === id
+                ? page.captions
+                : []
+          }
+          caption={nowPlaying.caption}
+          captionBusy={nowPlaying.captionBusy}
+          captionError={nowPlaying.captionError}
+          onSelectCaption={nowPlaying.chooseCaption}
           sleepTimer={nowPlaying.sleepTimer}
           onSetSleepTimer={nowPlaying.setSleepTimer}
           isLive={Boolean(details?.isLive)}

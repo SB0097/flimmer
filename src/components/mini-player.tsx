@@ -1,6 +1,6 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useEvent } from 'expo';
-import { router, useIsFocused } from 'expo-router';
+import { useRouter, useIsFocused } from 'expo-router';
 import { useEffect, useRef, type ComponentRef } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 
@@ -24,6 +24,7 @@ const MARGIN = Spacing.two;
  * über dem Inhalt, direkt über der Tab-Leiste.
  */
 export function MiniPlayer({ bottomInset = 0 }: { bottomInset?: number }) {
+  const router = useRouter();
   const focused = useIsFocused();
   const { width: screenWidth } = useWindowDimensions();
   const cardRef = useRef<ComponentRef<typeof View>>(null);
