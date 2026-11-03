@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { router } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
@@ -22,6 +22,7 @@ interface Props {
 
 /** Infobereich unter dem Player im YouTube-Stil */
 export function VideoInfo({ details, comments, onOpenComments, diagnostics }: Props) {
+  const router = useRouter();
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);

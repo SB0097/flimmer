@@ -1,6 +1,6 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Image } from 'expo-image';
-import { router, useScrollToTop } from 'expo-router';
+import { useRouter, useScrollToTop } from 'expo-router';
 import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -29,6 +29,7 @@ import type { VideoSummary } from '@/services/video-source';
 type Tab = 'Verlauf' | 'Favoriten' | 'Abos';
 
 export default function LibraryScreen() {
+  const router = useRouter();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const chrome = useScrollingChrome('library', insets.top + 120);
