@@ -1,4 +1,5 @@
 import { openDatabaseSync } from 'expo-sqlite';
+import { randomUUID } from 'expo-crypto';
 import { useSyncExternalStore } from 'react';
 
 import type { ChannelRef, VideoSummary } from '@/services/video-source/types';
@@ -27,7 +28,13 @@ function get(): LibrarySnapshot {
     try {
       snapshot = db().read();
     } catch (error) {
-      snapshot = { history: [], favorites: [], subscriptions: [], error: message(error) };
+      snapshot = {
+        history: [],
+        favorites: [],
+        subscriptions: [],
+        playlists: [],
+        error: message(error),
+      };
     }
   }
   return snapshot;
@@ -70,6 +77,19 @@ export const library = {
   toggleFavorite: (video: VideoSummary) => mutate((r) => r.toggleFavorite(video, Date.now())),
   toggleSubscription: (channel: ChannelRef) =>
     mutate((r) => r.toggleSubscription(channel, Date.now())),
+  createPlaylist: (name: string, video?: VideoSummary): string | undefined => {
+    const id = randomUUID();
+    return mutate((r) => r.createPlaylist(id, name, Date.now(), video)) ? id : undefined;
+  },
+  renamePlaylist: (id: string, name: string) =>
+    mutate((r) => r.renamePlaylist(id, name, Date.now())),
+  deletePlaylist: (id: string) => mutate((r) => r.deletePlaylist(id)),
+  addPlaylistVideo: (id: string, video: VideoSummary) =>
+    mutate((r) => r.addPlaylistVideo(id, video, Date.now())),
+  removePlaylistVideo: (id: string, videoId: string) =>
+    mutate((r) => r.removePlaylistVideo(id, videoId, Date.now())),
+  movePlaylistVideo: (id: string, videoId: string, direction: -1 | 1) =>
+    mutate((r) => r.movePlaylistVideo(id, videoId, direction, Date.now())),
   removeHistory: (id?: string) => {
     if (mutate((r) => r.removeHistory(id))) {
       if (id) historyRemovals.set(id, (historyRemovals.get(id) ?? 0) + 1);

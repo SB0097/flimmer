@@ -19,7 +19,7 @@ const video: VideoSummary = {
   thumbnails: [],
   isLive: false,
 };
-const empty: LibrarySnapshot = { history: [], favorites: [], subscriptions: [] };
+const empty: LibrarySnapshot = { history: [], favorites: [], subscriptions: [], playlists: [] };
 const source = jest.mocked(videoSource);
 const saved = jest.mocked(library);
 

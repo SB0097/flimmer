@@ -42,6 +42,8 @@ interface Props {
   segments?: Segment[];
   /** Während des Ladens nur der Ladekreis, kein Play-Knopf dahinter (wie YouTube) */
   isLoading?: boolean;
+  onPrevious?: () => void;
+  onNext?: () => void;
 }
 
 /**
@@ -58,6 +60,8 @@ export function PlayerControls({
   qualityLabel,
   segments = [],
   isLoading = false,
+  onPrevious,
+  onNext,
 }: Props) {
   const insets = useSafeAreaInsets();
   const sponsorSettings = useSponsorSettings();
@@ -140,15 +144,39 @@ export function PlayerControls({
       {visible && !seekHint ? (
         <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, styles.scrim]}>
           <View pointerEvents="box-none" style={styles.center}>
-            {isLoading ? null : (
-              <Pressable
-                onPress={togglePlay}
-                style={styles.playButton}
-                accessibilityRole="button"
-                accessibilityLabel={isPlaying ? 'Pause' : 'Abspielen'}>
-                <MaterialIcons name={isPlaying ? 'pause' : 'play-arrow'} size={44} color="#fff" />
-              </Pressable>
-            )}
+            <View style={styles.playRow}>
+              {onPrevious || onNext ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Vorheriges Video"
+                  accessibilityState={{ disabled: !onPrevious }}
+                  disabled={!onPrevious}
+                  onPress={onPrevious}
+                  style={[styles.skipButton, !onPrevious && { opacity: 0.3 }]}>
+                  <MaterialIcons name="skip-previous" size={32} color="#fff" />
+                </Pressable>
+              ) : null}
+              {isLoading ? null : (
+                <Pressable
+                  onPress={togglePlay}
+                  style={styles.playButton}
+                  accessibilityRole="button"
+                  accessibilityLabel={isPlaying ? 'Pause' : 'Abspielen'}>
+                  <MaterialIcons name={isPlaying ? 'pause' : 'play-arrow'} size={44} color="#fff" />
+                </Pressable>
+              )}
+              {onPrevious || onNext ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Nächstes Video"
+                  accessibilityState={{ disabled: !onNext }}
+                  disabled={!onNext}
+                  onPress={onNext}
+                  style={[styles.skipButton, !onNext && { opacity: 0.3 }]}>
+                  <MaterialIcons name="skip-next" size={32} color="#fff" />
+                </Pressable>
+              ) : null}
+            </View>
           </View>
 
           <View
@@ -344,6 +372,8 @@ function SeekBar({
 }
 
 const styles = StyleSheet.create({
+  playRow: { flexDirection: 'row', alignItems: 'center', gap: 24 },
+  skipButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   scrim: {
     backgroundColor: 'rgba(0,0,0,0.45)',
   },

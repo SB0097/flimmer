@@ -3,10 +3,11 @@
 Werbefreier YouTube-Player für Android, gebaut mit Expo.
 
 - Keine Werbung, Sponsor-Teile werden per [SponsorBlock](https://sponsor.ajay.app) übersprungen
-- Kein Google-Konto nötig, alle Daten bleiben auf dem Gerät
+- Kein Google-Konto nötig; Verlauf, Favoriten, Abos und Playlists werden lokal gespeichert
 - Hintergrund-Wiedergabe und Bild-in-Bild
 - Lokale Bibliothek: Verlauf mit Sehpositionen, Favoriten und Kanal-Abos
 - Kanalseiten und eine persönliche „Für dich“-Startseite ohne Google-Login
+- Eigene Playlists mit sortierbaren Videos und fortlaufender Wiedergabe
 
 ## Bibliothek und Startseite
 
@@ -30,6 +31,23 @@ Pro Aktualisierung werden höchstens acht länger nicht aktualisierte Abos und s
 Interessen-Videos abgefragt, mit maximal drei Anfragen gleichzeitig. Bei vielen Abos
 werden beim nächsten Aktualisieren weitere Kanäle berücksichtigt. Der Verlauf hält die
 letzten 1.000 Videos vor; Favoriten bleiben unabhängig davon erhalten.
+
+## Playlists
+
+Unter **Bibliothek → Meine Playlists** kannst du Listen anlegen, umbenennen und löschen.
+Über das Playlist-Symbol an einer Videokachel oder **Speichern** unter dem Player fügst du
+ein Video einer oder mehreren Listen hinzu. Auf der Detailseite lässt sich die Reihenfolge
+mit den Pfeilen ändern; Entfernen aus einer Playlist lässt Verlauf und Favoriten bestehen.
+
+**Alles abspielen** startet beim ersten Eintrag, Antippen eines Videos an dieser Stelle.
+Danach folgt automatisch das nächste Video, auch im Mini-Player und Hintergrund. Im Player
+gibt es Vor/Zurück, im Mini-Player einen Knopf für das nächste Video. Am Listenende wird nicht
+von vorn begonnen; ein Sleep-Timer kann die Fortsetzung vorher anhalten.
+
+Die gestartete Reihenfolge bleibt für die laufende Wiedergabe erhalten. Änderungen an der
+gespeicherten Playlist gelten beim nächsten Start der Liste. Playlists überstehen App-Neustarts;
+sie speichern Videoeinträge, keine heruntergeladenen Videodateien. Zum Abspielen ist weiterhin
+eine Internetverbindung erforderlich.
 
 > 🚧 Frühe Entwicklungsphase
 

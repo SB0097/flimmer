@@ -1,6 +1,7 @@
 import { useEvent } from 'expo';
 import {
   router,
+  Stack,
   useFocusEffect,
   useIsFocused,
   useLocalSearchParams,
@@ -34,6 +35,7 @@ import { ThemedText } from '@/components/themed-text';
 import { VideoCard } from '@/components/video-card';
 import { CommentsPanel } from '@/components/watch/comments-panel';
 import { PlayerControls } from '@/components/watch/player-controls';
+import { PlaylistControls } from '@/components/watch/playlist-controls';
 import { PlayerMenu } from '@/components/watch/player-menu';
 import { SponsorOverlay } from '@/components/watch/sponsor-overlay';
 import { useMinimizeGesture } from '@/components/watch/use-minimize-gesture';
@@ -41,6 +43,7 @@ import { VideoInfo } from '@/components/watch/video-info';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { friendlyStreamError } from '@/lib/friendly-error';
+import { playlistNeighbor } from '@/lib/playlists';
 import { library } from '@/services/library/store';
 import { getMiniPlayerFrame, type Frame } from '@/services/playback/mini-frame';
 import { useNowPlaying, type StreamState } from '@/services/playback/now-playing';
@@ -53,9 +56,17 @@ import {
 } from '@/services/video-source';
 
 export default function WatchScreen() {
-  const { id, from } = useLocalSearchParams<{ id: string; from?: string }>();
+  const {
+    id: routeId,
+    from,
+    playlist: playlistId,
+  } = useLocalSearchParams<{ id: string; from?: string; playlist?: string }>();
   const theme = useTheme();
   const nowPlaying = useNowPlaying();
+  const id =
+    playlistId && nowPlaying.playlist?.id === playlistId && nowPlaying.videoId
+      ? nowPlaying.videoId
+      : routeId;
   const focused = useIsFocused();
   const { player, open, retry, chooseQuality: choose, qualities, quality, segments } = nowPlaying;
   // Bis der Player auf dieses Video umgeschaltet hat, gilt es als „lädt“
@@ -66,7 +77,9 @@ export default function WatchScreen() {
   const [related, setRelated] = useState<VideoSummary[]>([]);
   const moreRelated = useRef<RelatedPage['more']>(undefined);
   const loadingMore = useRef(false);
-  const [comments, setComments] = useState<CommentsResult | null>();
+  const pageRequest = useRef(0);
+  const [loadedComments, setComments] = useState<{ id: string; result: CommentsResult | null }>();
+  const comments = loadedComments?.id === id ? loadedComments.result : undefined;
   const [showComments, setShowComments] = useState(false);
   const [showQuality, setShowQuality] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -81,16 +94,26 @@ export default function WatchScreen() {
   // die Wiedergabe läuft im Mini-Player weiter.
   useFocusEffect(
     useCallback(() => {
-      open(id);
-      return () => {
+      open(routeId, playlistId);
+    }, [routeId, playlistId, open]),
+  );
+  useFocusEffect(
+    useCallback(
+      () => () => {
         setIsFullscreen(false);
         ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
-      };
-    }, [id, open]),
+      },
+      [],
+    ),
   );
 
   // Seitendaten (Beschreibung, nächste Videos) und Kommentare laden
   useEffect(() => {
+    if (!focused) return;
+    const request = pageRequest.current + 1;
+    pageRequest.current = request;
+    loadingMore.current = false;
+    moreRelated.current = undefined;
     let cancelled = false;
 
     async function loadPage() {
@@ -110,9 +133,9 @@ export default function WatchScreen() {
     async function loadComments() {
       try {
         const result = await videoSource.getComments(id, 'top');
-        if (!cancelled) setComments(result);
+        if (!cancelled) setComments({ id, result });
       } catch {
-        if (!cancelled) setComments(null);
+        if (!cancelled) setComments({ id, result: null });
       }
     }
 
@@ -120,27 +143,33 @@ export default function WatchScreen() {
     loadComments();
     return () => {
       cancelled = true;
+      pageRequest.current = request + 1;
     };
-  }, [id]);
+  }, [id, focused]);
 
   const loadMore = useCallback(async () => {
-    if (!moreRelated.current || loadingMore.current) return;
+    if (page?.details.id !== id || !moreRelated.current || loadingMore.current) return;
     loadingMore.current = true;
+    const token = pageRequest.current;
     try {
       const next = await moreRelated.current();
+      if (token !== pageRequest.current) return;
       moreRelated.current = next.more;
       setRelated((prev) => {
         const seen = new Set(prev.map((v) => v.id));
         return [...prev, ...next.items.filter((v) => !seen.has(v.id) && v.id !== id)];
       });
     } catch {
-      moreRelated.current = undefined;
+      if (token === pageRequest.current) moreRelated.current = undefined;
     } finally {
-      loadingMore.current = false;
+      if (token === pageRequest.current) loadingMore.current = false;
     }
-  }, [id]);
+  }, [id, page]);
 
-  const details = page?.details ?? (stream.kind === 'ready' ? stream.result.details : undefined);
+  const details =
+    (page?.details.id === id ? page.details : undefined) ??
+    (stream.kind === 'ready' ? stream.result.details : undefined);
+  const queueIds = nowPlaying.playlist?.videoIds ?? [];
 
   const chooseQuality = useCallback(
     (height: number | undefined) => {
@@ -327,6 +356,7 @@ export default function WatchScreen() {
 
   return (
     <View ref={rootRef} onLayout={measureRoot} style={styles.container}>
+      <Stack.Screen options={{ statusBarHidden: isFullscreen, statusBarStyle: 'light' }} />
       <Animated.View
         style={[
           styles.container,
@@ -371,6 +401,16 @@ export default function WatchScreen() {
                         onOpenSettings={() => setShowQuality(true)}
                         qualityLabel={qualities ? qualityLabel : undefined}
                         segments={segments}
+                        onPrevious={
+                          playlistNeighbor(queueIds, id, -1)
+                            ? () => nowPlaying.stepPlaylist(-1)
+                            : undefined
+                        }
+                        onNext={
+                          playlistNeighbor(queueIds, id, 1)
+                            ? () => nowPlaying.stepPlaylist(1)
+                            : undefined
+                        }
                         isLoading={isLoading}
                       />
                     ) : null}
@@ -414,22 +454,27 @@ export default function WatchScreen() {
         {!isFullscreen ? (
           <Animated.View style={[styles.flex, { opacity: swipe.contentOpacity }]}>
             <FlatList
-              data={related}
+              data={page?.details.id === id ? related : []}
               keyExtractor={(v) => v.id}
               renderItem={({ item }) => <VideoCard video={item} />}
               ListHeaderComponent={
-                <VideoInfo
-                  details={details}
-                  comments={comments}
-                  onOpenComments={() => setShowComments(true)}
-                  diagnostics={diagnostics}
-                />
+                <>
+                  <PlaylistControls />
+                  <VideoInfo
+                    key={id}
+                    details={details}
+                    comments={comments}
+                    onOpenComments={() => setShowComments(true)}
+                    diagnostics={diagnostics}
+                  />
+                </>
               }
               onEndReached={loadMore}
               onEndReachedThreshold={1.5}
             />
             {showComments ? (
               <CommentsPanel
+                key={id}
                 videoId={id}
                 initial={comments ?? undefined}
                 onClose={() => setShowComments(false)}

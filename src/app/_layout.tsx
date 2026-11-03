@@ -2,6 +2,7 @@ import '@/polyfills';
 
 import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
+import { StatusBar } from 'expo-status-bar';
 import { useColorScheme } from 'react-native';
 
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
@@ -14,6 +15,7 @@ export default function RootLayout() {
   return (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <NowPlayingProvider>
+        <StatusBar style="auto" />
         <AnimatedSplashOverlay />
         <Stack>
           <Stack.Screen
@@ -35,6 +37,20 @@ export default function RootLayout() {
           />
           <Stack.Screen name="settings" options={{ title: 'Einstellungen' }} />
           <Stack.Screen name="channel/[id]" options={{ title: 'Kanal' }} />
+          <Stack.Screen
+            name="playlists"
+            options={{
+              title: 'Playlists',
+              statusBarStyle: colorScheme === 'dark' ? 'light' : 'dark',
+            }}
+          />
+          <Stack.Screen
+            name="playlist/[id]"
+            options={{
+              title: 'Playlist',
+              statusBarStyle: colorScheme === 'dark' ? 'light' : 'dark',
+            }}
+          />
         </Stack>
       </NowPlayingProvider>
     </ThemeProvider>

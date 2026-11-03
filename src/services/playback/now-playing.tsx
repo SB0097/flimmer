@@ -11,6 +11,7 @@ import {
 } from 'react';
 
 import type { Segment } from '@/lib/segments';
+import { playlistNeighbor, type PlaybackQueue } from '@/lib/playlists';
 import { sleepRemainingMs, sleepStep, type SleepTimer } from '@/lib/sleep-timer';
 import { library } from '@/services/library/store';
 import { usePlaybackHistory } from '@/services/library/use-playback-history';
@@ -50,7 +51,11 @@ export interface NowPlaying {
   /** Gewählte Höhe in Pixeln; undefined = Auto */
   quality?: number;
   /** Video laden und abspielen; läuft es schon, passiert nichts */
-  open(id: string): void;
+  open(id: string, playlistId?: string): void;
+  playlist?: PlaybackQueue;
+  playPlaylist(playlistId: string, startId: string): boolean;
+  stepPlaylist(direction: -1 | 1): void;
+  leavePlaylist(): void;
   retry(): void;
   chooseQuality(height: number | undefined): Promise<void>;
   /** Wiedergabe beenden (Mini-Player schließen) */
@@ -77,6 +82,10 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
   const [segments, setSegments] = useState<Segment[]>([]);
   const [qualities, setQualities] = useState<QualityInfo>();
   const [quality, setQuality] = useState<number>();
+  const [playlist, setPlaylist] = useState<PlaybackQueue>();
+  const playlistRef = useRef<PlaybackQueue | undefined>(undefined);
+  const readyId = useRef<string | undefined>(undefined);
+  const autoAdvanceBlocked = useRef(false);
 
   const [sleepTimer, setSleepTimerState] = useState<SleepTimer>();
   const currentId = useRef<string | undefined>(undefined);
@@ -93,10 +102,12 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
     setQuality(undefined);
   }, []);
 
-  const open = useCallback(
+  const loadVideo = useCallback(
     (id: string) => {
       if (currentId.current === id) return;
       currentId.current = id;
+      readyId.current = undefined;
+      autoAdvanceBlocked.current = false;
       reset();
       setPlayerVolume(player, 1);
       setSleepTimerState((t) => (t?.kind === 'endOfVideo' ? undefined : t));
@@ -105,12 +116,57 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
     [player, reset],
   );
 
+  const leavePlaylist = useCallback(() => {
+    playlistRef.current = undefined;
+    setPlaylist(undefined);
+  }, []);
+
+  const playPlaylist = useCallback(
+    (playlistId: string, startId: string) => {
+      const saved = library.get().playlists.find((p) => p.id === playlistId);
+      if (!saved || !saved.videos.some((v) => v.id === startId)) return false;
+      const queue: PlaybackQueue = {
+        id: saved.id,
+        name: saved.name,
+        videoIds: saved.videos.map((v) => v.id),
+      };
+      playlistRef.current = queue;
+      setPlaylist(queue);
+      loadVideo(startId);
+      return true;
+    },
+    [loadVideo],
+  );
+
+  const open = useCallback(
+    (id: string, playlistId?: string) => {
+      // Eine wieder geöffnete Video-Seite folgt der inzwischen weitergelaufenen Liste.
+      if (playlistId && playlistRef.current?.id === playlistId) return;
+      if (playlistId && playPlaylist(playlistId, id)) return;
+      leavePlaylist();
+      loadVideo(id);
+    },
+    [leavePlaylist, loadVideo, playPlaylist],
+  );
+
+  const stepPlaylist = useCallback(
+    (direction: -1 | 1) => {
+      if (!playlistRef.current || !currentId.current) return;
+      const next = playlistNeighbor(playlistRef.current.videoIds, currentId.current, direction);
+      if (next) loadVideo(next);
+    },
+    [loadVideo],
+  );
+
   const close = useCallback(() => {
     currentId.current = undefined;
+    readyId.current = undefined;
+    leavePlaylist();
+    setSleepTimerState(undefined);
     stopPlayback(player);
     reset();
     setVideoId(undefined);
-  }, [player, reset]);
+  }, [player, reset, leavePlaylist]);
 
   const setSleepTimer = useCallback(
     (choice: number | 'endOfVideo' | undefined) => {
@@ -137,6 +193,7 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
     const sleepTimer = activeSleep;
     if (!sleepTimer) return;
     const finish = () => {
+      autoAdvanceBlocked.current = true;
       player.pause();
       setPlayerVolume(player, 1);
       setSleepTimerState(undefined);
@@ -170,6 +227,28 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
     };
   }, [player, activeSleep]);
 
+  // Derselbe Player spielt die Liste auch im Mini-Player und im Hintergrund weiter.
+  // Doppelte/späte Ende-Events des alten Streams dürfen keinen Eintrag überspringen.
+  useEffect(() => {
+    const playing = player.addListener('playingChange', ({ isPlaying }) => {
+      if (isPlaying) autoAdvanceBlocked.current = false;
+    });
+    const ended = player.addListener('playToEnd', () => {
+      if (!currentId.current || readyId.current !== currentId.current || autoAdvanceBlocked.current)
+        return;
+      if (
+        activeSleep?.kind === 'endOfVideo' ||
+        (activeSleep?.kind === 'time' && Date.now() >= activeSleep.endsAt)
+      )
+        return;
+      stepPlaylist(1);
+    });
+    return () => {
+      playing.remove();
+      ended.remove();
+    };
+  }, [player, activeSleep, stepPlaylist]);
+
   const retry = useCallback(() => {
     setStream({ kind: 'loading' });
     setAttempt((n) => n + 1);
@@ -191,6 +270,7 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
             : undefined;
         await playSource(player, result.source, result.details, savedPosition);
         if (cancelled) return;
+        readyId.current = id;
         setStream({ kind: 'ready', result });
         const info = await loadQualities(result.source).catch(() => undefined);
         if (!cancelled) setQualities(info);
@@ -225,6 +305,7 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
       setQuality(height);
       const position = player.currentTime;
       const source = await sourceForQuality(stream.result.source, qualities, height, videoId);
+      if (currentId.current !== videoId) return;
       await playSource(player, source, stream.result.details, position);
     },
     [stream, qualities, quality, player, videoId],
@@ -240,6 +321,10 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
       qualities,
       quality,
       open,
+      playlist,
+      playPlaylist,
+      stepPlaylist,
+      leavePlaylist,
       retry,
       chooseQuality,
       close,
@@ -255,6 +340,10 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
       qualities,
       quality,
       open,
+      playlist,
+      playPlaylist,
+      stepPlaylist,
+      leavePlaylist,
       retry,
       chooseQuality,
       close,
