@@ -36,6 +36,13 @@ export default function RootLayout() {
             }}
           />
           <Stack.Screen name="settings" options={{ title: 'Einstellungen' }} />
+          <Stack.Screen
+            name="downloads"
+            options={{
+              title: 'Downloads',
+              statusBarStyle: colorScheme === 'dark' ? 'light' : 'dark',
+            }}
+          />
           <Stack.Screen name="channel/[id]" options={{ title: 'Kanal' }} />
           <Stack.Screen
             name="playlists"

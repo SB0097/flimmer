@@ -8,13 +8,14 @@ Werbefreier YouTube-Player für Android, gebaut mit Expo.
 - Lokale Bibliothek: Verlauf mit Sehpositionen, Favoriten und Kanal-Abos
 - Kanalseiten und eine persönliche „Für dich“-Startseite ohne Google-Login
 - Eigene Playlists mit sortierbaren Videos und fortlaufender Wiedergabe
+- Video- und Audio-Downloads für die Offline-Wiedergabe
 
 ## Bibliothek und Startseite
 
 Unter einem Video kannst du es als Favorit markieren und den Kanal abonnieren. Über den
 Kanalnamen oder das Kanalbild öffnest du seine Videos. In der Bibliothek findest du Verlauf,
 Favoriten und die ungesehenen Videos deiner Abos. Favoriten speichern nur den Eintrag,
-nicht die Videodatei; zum Abspielen brauchst du weiterhin eine Internetverbindung.
+nicht die Videodatei; ohne passenden Download brauchst du zum Abspielen eine Internetverbindung.
 
 Der Verlauf beginnt nach fünf abgespielten Sekunden. Positionen werden während der Wiedergabe
 regelmäßig sowie beim Pausieren und Wechseln gespeichert, auch im Mini-Player und Hintergrund.
@@ -47,7 +48,29 @@ von vorn begonnen; ein Sleep-Timer kann die Fortsetzung vorher anhalten.
 Die gestartete Reihenfolge bleibt für die laufende Wiedergabe erhalten. Änderungen an der
 gespeicherten Playlist gelten beim nächsten Start der Liste. Playlists überstehen App-Neustarts;
 sie speichern Videoeinträge, keine heruntergeladenen Videodateien. Zum Abspielen ist weiterhin
-eine Internetverbindung erforderlich.
+ohne passenden Download eine Internetverbindung erforderlich.
+
+## Downloads
+
+Über das Download-Symbol an einer Videokachel oder **Download** unter dem Player speicherst
+du ein Video (bis 360p oder 720p, je nach verfügbarer Auflösung) oder nur die Tonspur.
+Unter **Bibliothek → Downloads** findest du Fortschritt, Speicherverbrauch, Abbrechen,
+erneutes Laden und Löschen. Video und Audio können getrennt gespeichert werden.
+
+Bitte Flimmer während des Downloads geöffnet lassen. Die Warteschlange lädt einen Eintrag
+nach dem anderen. Nach einem App-Abbruch werden unvollständige Downloads als unterbrochen
+angezeigt und lassen sich neu starten; dabei wird die Datei vollständig neu geladen.
+Livestreams und geschützte oder nicht unterstützte Stream-Formate sind nicht herunterladbar.
+
+Fertige Downloads spielen ohne Internet im gewohnten Player, auch aus Verlauf und Playlists.
+Falls Video und Audio gespeichert sind, wird automatisch das Video bevorzugt; auf der
+Download-Seite lässt sich die Tonspur gezielt starten. Sehpositionen, Hintergrund-Wiedergabe
+und Sleep-Timer funktionieren weiter. Verfügbare SponsorBlock-Segmente werden beim Download
+mitgespeichert. Kommentare und neue Vorschläge stehen offline nicht zur Verfügung.
+
+Die Dateien bleiben im privaten App-Speicher und überstehen App-Updates. Löschen eines
+Downloads entfernt nur diese Dateien; Verlauf, Favoriten und Playlists bleiben erhalten.
+Eine Deinstallation oder das Löschen der App-Daten entfernt auch die Downloads.
 
 > 🚧 Frühe Entwicklungsphase
 

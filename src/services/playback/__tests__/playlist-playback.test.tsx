@@ -1,6 +1,8 @@
 import { act, renderHook, waitFor } from '@testing-library/react-native';
 
 import { library } from '@/services/library/store';
+import { downloads } from '@/services/downloads/store';
+import { fetchSegments } from '@/services/sponsorblock/sponsorblock';
 import { videoSource } from '@/services/video-source';
 import { playSource } from '../player-actions';
 import { NowPlayingProvider, useNowPlaying } from '../now-playing';
@@ -25,6 +27,9 @@ const emit = (event: string, isPlaying = false) => {
 
 jest.mock('expo-video', () => ({ useVideoPlayer: () => mockPlayer }));
 jest.mock('@/services/library/store', () => ({ library: { get: jest.fn() } }));
+jest.mock('@/services/downloads/store', () => ({
+  downloads: { playback: jest.fn(async () => undefined), find: jest.fn() },
+}));
 jest.mock('@/services/library/use-playback-history', () => ({ usePlaybackHistory: jest.fn() }));
 jest.mock('@/services/settings/playback-settings', () => ({
   playbackSettings: { get: () => ({}) },
@@ -64,6 +69,8 @@ const video = (id: string) => ({
 
 beforeEach(() => {
   jest.clearAllMocks();
+  jest.mocked(downloads.playback).mockReset().mockResolvedValue(undefined);
+  jest.mocked(downloads.find).mockReset();
   mockListeners.clear();
   mockPlayer.currentTime = 0;
   saved.get.mockReturnValue({
@@ -85,6 +92,62 @@ beforeEach(() => {
     attempts: [],
     details: { ...video(id), description: '' },
   }));
+});
+
+it('spielt gespeicherte Playlist-Videos ohne YouTube- oder SponsorBlock-Anfrage ab', async () => {
+  jest.mocked(downloads.playback).mockImplementation(async (id) => ({
+    source: {
+      uri: `file:///downloads/${id}/index.m3u8`,
+      contentType: 'hls',
+      via: 'Download · 720p',
+    },
+    details: { ...video(id), description: '' },
+    attempts: [],
+  }));
+  jest.mocked(downloads.find).mockReturnValue({
+    id: 'local',
+    video: video('a'),
+    mode: 'video',
+    quality: 720,
+    status: 'ready',
+    bytes: 123,
+    progress: 1,
+    createdAt: 1,
+    segments: [],
+  });
+  const { result } = await start();
+  expect(playSource).toHaveBeenLastCalledWith(
+    mockPlayer,
+    expect.objectContaining({ uri: 'file:///downloads/a/index.m3u8' }),
+    expect.anything(),
+    undefined,
+  );
+  await act(() => emit('playToEnd'));
+  await waitFor(() => expect(result.current.stream.kind).toBe('ready'));
+  expect(result.current.videoId).toBe('b');
+  expect(source.getStreams).not.toHaveBeenCalled();
+  expect(fetchSegments).not.toHaveBeenCalled();
+});
+
+it('wechselt bei derselben Video-ID gezielt von Video auf den Audio-Download', async () => {
+  const { result } = await start();
+  jest.mocked(downloads.playback).mockResolvedValue({
+    source: { uri: 'file:///audio.m3u8', contentType: 'hls', via: 'Download · Nur Audio' },
+    details: { ...video('a'), description: '' },
+    attempts: [],
+  });
+  await act(() => result.current.open('a', undefined, 'audio-id'));
+  await waitFor(() => expect(result.current.stream.kind).toBe('ready'));
+  expect(downloads.playback).toHaveBeenLastCalledWith('a', 'audio-id');
+  expect(playSource).toHaveBeenLastCalledWith(
+    mockPlayer,
+    expect.objectContaining({ uri: 'file:///audio.m3u8' }),
+    expect.anything(),
+    undefined,
+  );
+  const count = jest.mocked(playSource).mock.calls.length;
+  await act(() => result.current.open('a'));
+  expect(playSource).toHaveBeenCalledTimes(count);
 });
 
 async function start(id = 'a') {

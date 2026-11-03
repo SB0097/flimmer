@@ -5,6 +5,7 @@ import { Pressable, StyleSheet, View } from 'react-native';
 import { ThemedText } from '@/components/themed-text';
 import { VideoThumbnail } from '@/components/video-thumbnail';
 import { SaveToPlaylistButton } from '@/components/playlist-picker';
+import { DownloadButton } from '@/components/download-button';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { formatDuration } from '@/lib/format';
@@ -78,7 +79,10 @@ export function VideoCard({ video }: { video: VideoSummary }) {
             </ThemedText>
           </Pressable>
         </View>
-        <SaveToPlaylistButton video={video} compact />
+        <View>
+          <SaveToPlaylistButton video={video} compact />
+          <DownloadButton video={video} compact />
+        </View>
       </View>
     </View>
   );

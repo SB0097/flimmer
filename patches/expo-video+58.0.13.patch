@@ -10,6 +10,15 @@ diff --git a/node_modules/expo-video/android/src/main/java/expo/modules/video/pl
        playerBuilderOptions?.seekBackwardIncrement?.let {
          setSeekBackIncrementMs((it).toLong(DurationUnit.MILLISECONDS).coerceIn(1, 999_000))
        }
+@@ -452,3 +454,8 @@
+     mediaSource?.let {
++      // Flimmer: lokale Downloads wechseln ohne Ladepause. stop() gibt den alten
++      // Decoder frei, sonst behält Goldfish bei kleinerer Auflösung den Bildpuffer.
++      if (newSource?.uri?.scheme == "file" && newSource.uri?.path?.contains("/downloads/") == true) {
++        player.stop()
++      }
+       player.setMediaSource(it)
+       player.prepare()
 diff --git a/node_modules/expo-video/android/src/main/java/expo/modules/video/playbackService/ExpoVideoPlaybackService.kt b/node_modules/expo-video/android/src/main/java/expo/modules/video/playbackService/ExpoVideoPlaybackService.kt
 --- a/node_modules/expo-video/android/src/main/java/expo/modules/video/playbackService/ExpoVideoPlaybackService.kt
 +++ b/node_modules/expo-video/android/src/main/java/expo/modules/video/playbackService/ExpoVideoPlaybackService.kt

@@ -14,6 +14,7 @@ import type { Segment } from '@/lib/segments';
 import { playlistNeighbor, type PlaybackQueue } from '@/lib/playlists';
 import { sleepRemainingMs, sleepStep, type SleepTimer } from '@/lib/sleep-timer';
 import { library } from '@/services/library/store';
+import { downloads } from '@/services/downloads/store';
 import { usePlaybackHistory } from '@/services/library/use-playback-history';
 import { applyPlaybackSettings } from '@/services/playback/background';
 import {
@@ -51,7 +52,7 @@ export interface NowPlaying {
   /** Gewählte Höhe in Pixeln; undefined = Auto */
   quality?: number;
   /** Video laden und abspielen; läuft es schon, passiert nichts */
-  open(id: string, playlistId?: string): void;
+  open(id: string, playlistId?: string, downloadId?: string): void;
   playlist?: PlaybackQueue;
   playPlaylist(playlistId: string, startId: string): boolean;
   stepPlaylist(direction: -1 | 1): void;
@@ -89,6 +90,7 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
 
   const [sleepTimer, setSleepTimerState] = useState<SleepTimer>();
   const currentId = useRef<string | undefined>(undefined);
+  const currentDownload = useRef<string | undefined>(undefined);
 
   // Einstellung „Im Hintergrund weiterspielen“ live übernehmen
   useEffect(() => {
@@ -103,8 +105,11 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const loadVideo = useCallback(
-    (id: string) => {
-      if (currentId.current === id) return;
+    (id: string, downloadId?: string) => {
+      if (currentId.current === id && (!downloadId || currentDownload.current === downloadId))
+        return;
+      if (currentId.current === id) setAttempt((n) => n + 1);
+      currentDownload.current = downloadId;
       currentId.current = id;
       readyId.current = undefined;
       autoAdvanceBlocked.current = false;
@@ -139,12 +144,12 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
   );
 
   const open = useCallback(
-    (id: string, playlistId?: string) => {
+    (id: string, playlistId?: string, downloadId?: string) => {
       // Eine wieder geöffnete Video-Seite folgt der inzwischen weitergelaufenen Liste.
       if (playlistId && playlistRef.current?.id === playlistId) return;
       if (playlistId && playPlaylist(playlistId, id)) return;
       leavePlaylist();
-      loadVideo(id);
+      loadVideo(id, downloadId);
     },
     [leavePlaylist, loadVideo, playPlaylist],
   );
@@ -160,6 +165,7 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
 
   const close = useCallback(() => {
     currentId.current = undefined;
+    currentDownload.current = undefined;
     readyId.current = undefined;
     leavePlaylist();
     setSleepTimerState(undefined);
@@ -261,7 +267,9 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
 
     async function loadStream(id: string) {
       try {
-        const result = await videoSource.getStreams(id);
+        const result =
+          (await downloads.playback(id, currentDownload.current)) ??
+          (await videoSource.getStreams(id));
         if (cancelled) return;
         const history = library.get().history.find((h) => h.video.id === id);
         const savedPosition =
@@ -285,7 +293,8 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
     }
 
     async function loadSegments(id: string) {
-      const result = await fetchSegments(id).catch(() => []);
+      const local = downloads.find(id, currentDownload.current);
+      const result = local ? (local.segments ?? []) : await fetchSegments(id).catch(() => []);
       if (!cancelled) setSegments(result);
     }
 

@@ -45,6 +45,7 @@ import { useTheme } from '@/hooks/use-theme';
 import { friendlyStreamError } from '@/lib/friendly-error';
 import { playlistNeighbor } from '@/lib/playlists';
 import { library } from '@/services/library/store';
+import { downloads } from '@/services/downloads/store';
 import { getMiniPlayerFrame, type Frame } from '@/services/playback/mini-frame';
 import { useNowPlaying, type StreamState } from '@/services/playback/now-playing';
 import {
@@ -60,7 +61,8 @@ export default function WatchScreen() {
     id: routeId,
     from,
     playlist: playlistId,
-  } = useLocalSearchParams<{ id: string; from?: string; playlist?: string }>();
+    download: downloadId,
+  } = useLocalSearchParams<{ id: string; from?: string; playlist?: string; download?: string }>();
   const theme = useTheme();
   const nowPlaying = useNowPlaying();
   const id =
@@ -94,8 +96,8 @@ export default function WatchScreen() {
   // die Wiedergabe läuft im Mini-Player weiter.
   useFocusEffect(
     useCallback(() => {
-      open(routeId, playlistId);
-    }, [routeId, playlistId, open]),
+      open(routeId, playlistId, downloadId);
+    }, [routeId, playlistId, downloadId, open]),
   );
   useFocusEffect(
     useCallback(
@@ -118,6 +120,14 @@ export default function WatchScreen() {
 
     async function loadPage() {
       try {
+        const local = downloads.find(id, downloadId);
+        if (local) {
+          if (!cancelled) {
+            setPage({ details: local.details ?? { ...local.video, description: '' }, related: [] });
+            setRelated([]);
+          }
+          return;
+        }
         const result = await videoSource.getWatchPage(id);
         if (cancelled) return;
         setPage(result);
@@ -131,6 +141,10 @@ export default function WatchScreen() {
     }
 
     async function loadComments() {
+      if (downloads.find(id, downloadId)) {
+        if (!cancelled) setComments({ id, result: null });
+        return;
+      }
       try {
         const result = await videoSource.getComments(id, 'top');
         if (!cancelled) setComments({ id, result });
@@ -145,7 +159,7 @@ export default function WatchScreen() {
       cancelled = true;
       pageRequest.current = request + 1;
     };
-  }, [id, focused]);
+  }, [id, focused, downloadId]);
 
   const loadMore = useCallback(async () => {
     if (page?.details.id !== id || !moreRelated.current || loadingMore.current) return;
