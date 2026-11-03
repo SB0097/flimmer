@@ -1,10 +1,11 @@
 import { Image } from 'expo-image';
-import { router } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { SaveToPlaylistButton } from '@/components/playlist-picker';
+import { DownloadButton } from '@/components/download-button';
 import { FavoriteButton, LibraryError, SubscribeButton } from '@/components/library-actions';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -22,6 +23,7 @@ interface Props {
 
 /** Infobereich unter dem Player im YouTube-Stil */
 export function VideoInfo({ details, comments, onOpenComments, diagnostics }: Props) {
+  const router = useRouter();
   const theme = useTheme();
   const [expanded, setExpanded] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
@@ -81,6 +83,7 @@ export function VideoInfo({ details, comments, onOpenComments, diagnostics }: Pr
       <View style={styles.chips}>
         <FavoriteButton video={details} />
         <SaveToPlaylistButton video={details} />
+        <DownloadButton video={details} />
       </View>
       <LibraryError />
 

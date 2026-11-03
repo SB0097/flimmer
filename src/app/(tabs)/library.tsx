@@ -1,6 +1,6 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Image } from 'expo-image';
-import { router, useScrollToTop } from 'expo-router';
+import { useRouter, useScrollToTop } from 'expo-router';
 import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -24,17 +24,20 @@ import { useForYou } from '@/hooks/use-for-you';
 import { useTheme } from '@/hooks/use-theme';
 import { formatDuration } from '@/lib/format';
 import { library, useLibrary } from '@/services/library/store';
+import { useDownloads } from '@/services/downloads/store';
 import type { VideoSummary } from '@/services/video-source';
 
 type Tab = 'Verlauf' | 'Favoriten' | 'Abos';
 
 export default function LibraryScreen() {
+  const router = useRouter();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const chrome = useScrollingChrome('library', insets.top + 120);
+  const chrome = useScrollingChrome('library', insets.top + 104);
   const list = useRef<FlatList<VideoSummary>>(null);
   useScrollToTop(list);
   const saved = useLibrary();
+  const downloaded = useDownloads();
   const [tab, setTab] = useState<Tab>('Verlauf');
   const feed = useForYou({ enabled: tab === 'Abos', subscriptionsOnly: true });
   const subscribedIds = new Set(saved.subscriptions.map((s) => s.channel.id));
@@ -91,11 +94,12 @@ export default function LibraryScreen() {
                 style={[
                   styles.tab,
                   {
-                    backgroundColor:
-                      tab === name ? theme.backgroundSelected : theme.backgroundElement,
+                    backgroundColor: tab === name ? theme.accentSurface : theme.backgroundElement,
                   },
                 ]}>
-                <ThemedText type="smallBold">
+                <ThemedText
+                  type="smallBold"
+                  style={{ color: tab === name ? theme.accent : theme.textSecondary }}>
                   {name} · {counts[name]}
                 </ThemedText>
               </Pressable>
@@ -136,6 +140,26 @@ export default function LibraryScreen() {
               <MaterialIcons name="chevron-right" size={24} color={theme.textSecondary} />
             </Pressable>
             <LibraryError />
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => router.push('/downloads')}
+              style={styles.playlists}>
+              <MaterialIcons name="file-download" size={28} color={theme.text} />
+              <ThemedText type="smallBold" style={styles.flex}>
+                Downloads · {downloaded.items.filter((i) => i.status === 'ready').length}
+              </ThemedText>
+              <MaterialIcons name="chevron-right" size={24} color={theme.textSecondary} />
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => router.push('/import')}
+              style={styles.playlists}>
+              <MaterialIcons name="file-upload" size={26} color={theme.text} />
+              <ThemedText type="smallBold" style={styles.flex}>
+                YouTube-Daten importieren
+              </ThemedText>
+              <MaterialIcons name="chevron-right" size={24} color={theme.textSecondary} />
+            </Pressable>
             {tab === 'Verlauf' && saved.history.length ? (
               <Pressable accessibilityRole="button" onPress={clearHistory} style={styles.clear}>
                 <ThemedText type="smallBold">Verlauf löschen</ThemedText>
@@ -193,7 +217,9 @@ export default function LibraryScreen() {
                 <View style={styles.itemActions}>
                   <ThemedText type="small" themeColor="textSecondary" style={styles.flex}>
                     {history
-                      ? `${new Date(history.lastWatchedAt).toLocaleDateString('de-DE')} · ${formatDuration(history.position)}${item.durationSeconds ? ` / ${formatDuration(item.durationSeconds)}` : ''}`
+                      ? history.imported
+                        ? `Importiert · ${history.lastWatchedAt ? new Date(history.lastWatchedAt).toLocaleDateString('de-DE') : 'Zeitpunkt unbekannt'}`
+                        : `${new Date(history.lastWatchedAt).toLocaleDateString('de-DE')} · ${formatDuration(history.position)}${item.durationSeconds ? ` / ${formatDuration(item.durationSeconds)}` : ''}`
                       : 'Lokal favorisiert'}
                   </ThemedText>
                   <Pressable
@@ -252,9 +278,9 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: Spacing.three,
-    paddingTop: Spacing.two,
-    paddingBottom: Spacing.three,
-    gap: Spacing.two,
+    paddingTop: Spacing.one,
+    paddingBottom: Spacing.two,
+    gap: Spacing.one,
   },
   row: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two },
   tab: {

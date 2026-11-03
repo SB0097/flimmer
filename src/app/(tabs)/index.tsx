@@ -1,5 +1,6 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { router, useScrollToTop } from 'expo-router';
+import { Image } from 'expo-image';
+import { useRouter, useScrollToTop } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import Animated from 'react-native-reanimated';
@@ -17,9 +18,10 @@ import { parseVideoId } from '@/lib/youtube-url';
 import { videoSource, type SearchPage, type VideoSummary } from '@/services/video-source';
 
 export default function HomeScreen() {
+  const router = useRouter();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
-  const chrome = useScrollingChrome('home', insets.top + 104);
+  const chrome = useScrollingChrome('home', insets.top + 96);
   const list = useRef<FlatList<VideoSummary>>(null);
   useScrollToTop(list);
   const feed = useForYou();
@@ -73,7 +75,7 @@ export default function HomeScreen() {
     } finally {
       if (request.current === token) setLoading(false);
     }
-  }, [query]);
+  }, [query, router]);
   const loadMore = useCallback(async () => {
     if (!nextPage.current || busy.current) return;
     const token = request.current;
@@ -103,7 +105,14 @@ export default function HomeScreen() {
         onLayout={chrome.onHeaderLayout}
         style={[styles.headerOverlay, { backgroundColor: theme.background }, chrome.headerStyle]}>
         <SafeAreaView edges={['top']} style={styles.header}>
-          <ThemedText type="subtitle">Flimmer</ThemedText>
+          <View style={styles.brand} accessibilityRole="header">
+            <Image
+              source={require('@/assets/images/icon.png')}
+              style={styles.logo}
+              accessible={false}
+            />
+            <ThemedText type="title">Flimmer</ThemedText>
+          </View>
           <View style={[styles.searchRow, { backgroundColor: theme.backgroundElement }]}>
             {searching ? (
               <Pressable
@@ -239,17 +248,19 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   header: {
     paddingHorizontal: Spacing.three,
-    paddingTop: Spacing.two,
-    paddingBottom: Spacing.three,
-    gap: Spacing.two,
+    paddingTop: Spacing.one,
+    paddingBottom: Spacing.two,
+    gap: Spacing.one,
   },
-  searchRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 24, minHeight: 48 },
+  brand: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, minHeight: 36 },
+  logo: { width: 30, height: 30, borderRadius: 8 },
+  searchRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 22, minHeight: 44 },
   icon: { width: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   searchIcon: { marginLeft: Spacing.three, marginRight: Spacing.two },
   input: {
     flex: 1,
     minWidth: 0,
-    paddingVertical: Spacing.two + Spacing.one,
+    paddingVertical: Spacing.two,
     paddingRight: Spacing.two,
     fontSize: 15,
   },

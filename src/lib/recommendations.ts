@@ -10,6 +10,7 @@ export interface RecommendationBatch {
 
 /** Kurze Abbrüche liefern schwächere Signale als weitgehend angesehene Videos. */
 export function watchWeight(entry: HistoryEntry): number {
+  if (entry.imported) return 1.5;
   const duration = entry.video.durationSeconds;
   const ratio = duration ? Math.min(1, entry.watchedSeconds / duration) : 0;
   return ratio >= 0.6 ? 3 : ratio >= 0.2 || entry.watchedSeconds >= 180 ? 1.5 : 0.25;

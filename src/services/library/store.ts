@@ -6,6 +6,7 @@ import type { ChannelRef, VideoSummary } from '@/services/video-source/types';
 
 import { LibraryRepository } from './repository';
 import type { FeedCache, LibrarySnapshot, ProgressUpdate } from './types';
+import type { LibraryImport, ImportResult } from './import-types';
 
 let repository: LibraryRepository | undefined;
 let snapshot: LibrarySnapshot | undefined;
@@ -65,6 +66,14 @@ function subscribe(listener: () => void) {
 
 export const library = {
   get,
+  importData: (batch: LibraryImport): ImportResult | undefined => {
+    let result: ImportResult | undefined;
+    return mutate((repo) => {
+      result = repo.importData(batch, Date.now());
+    })
+      ? result
+      : undefined;
+  },
   historyVersion: (id: string) => `${historyEpoch}:${historyRemovals.get(id) ?? 0}`,
   reload: () => mutate(() => {}),
   record: (video: VideoSummary, progress: ProgressUpdate) =>

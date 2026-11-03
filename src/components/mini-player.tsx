@@ -1,12 +1,12 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useEvent } from 'expo';
-import { router, useIsFocused } from 'expo-router';
+import { useRouter, useIsFocused } from 'expo-router';
 import { useEffect, useRef, type ComponentRef } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { PlayerVideo } from '@/components/player-video';
 import { VideoThumbnail } from '@/components/video-thumbnail';
-import { Spacing } from '@/constants/theme';
+import { Brand, Spacing } from '@/constants/theme';
 import { playlistNeighbor } from '@/lib/playlists';
 import { setMiniPlayerFrame } from '@/services/playback/mini-frame';
 import { useNowPlaying } from '@/services/playback/now-playing';
@@ -24,6 +24,7 @@ const MARGIN = Spacing.two;
  * über dem Inhalt, direkt über der Tab-Leiste.
  */
 export function MiniPlayer({ bottomInset = 0 }: { bottomInset?: number }) {
+  const router = useRouter();
   const focused = useIsFocused();
   const { width: screenWidth } = useWindowDimensions();
   const cardRef = useRef<ComponentRef<typeof View>>(null);
@@ -185,6 +186,6 @@ const styles = StyleSheet.create({
   },
   progress: {
     height: '100%',
-    backgroundColor: '#FF0033',
+    backgroundColor: Brand.playback,
   },
 });

@@ -14,12 +14,15 @@ import type { Segment } from '@/lib/segments';
 import { playlistNeighbor, type PlaybackQueue } from '@/lib/playlists';
 import { sleepRemainingMs, sleepStep, type SleepTimer } from '@/lib/sleep-timer';
 import { library } from '@/services/library/store';
+import { downloads } from '@/services/downloads/store';
 import { usePlaybackHistory } from '@/services/library/use-playback-history';
 import { applyPlaybackSettings } from '@/services/playback/background';
+import { loadCaption } from '@/services/playback/captions';
 import {
   playSource,
   resumablePosition,
   setPlayerVolume,
+  setPlayerSubtitle,
   stopPlayback,
 } from '@/services/playback/player-actions';
 import { loadQualities, sourceForQuality, type QualityInfo } from '@/services/playback/quality';
@@ -30,6 +33,8 @@ import {
   StreamUnavailableError,
   videoSource,
   type StreamAttempt,
+  type CaptionTrack,
+  type PlaybackSource,
   type StreamResult,
   type VideoDetails,
 } from '@/services/video-source';
@@ -51,13 +56,17 @@ export interface NowPlaying {
   /** Gewählte Höhe in Pixeln; undefined = Auto */
   quality?: number;
   /** Video laden und abspielen; läuft es schon, passiert nichts */
-  open(id: string, playlistId?: string): void;
+  open(id: string, playlistId?: string, downloadId?: string): void;
   playlist?: PlaybackQueue;
   playPlaylist(playlistId: string, startId: string): boolean;
   stepPlaylist(direction: -1 | 1): void;
   leavePlaylist(): void;
   retry(): void;
   chooseQuality(height: number | undefined): Promise<void>;
+  caption?: CaptionTrack;
+  captionBusy: boolean;
+  captionError?: string;
+  chooseCaption(track: CaptionTrack | undefined): Promise<void>;
   /** Wiedergabe beenden (Mini-Player schließen) */
   close(): void;
   /** Eingestellter Sleep-Timer; undefined = aus */
@@ -89,6 +98,70 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
 
   const [sleepTimer, setSleepTimerState] = useState<SleepTimer>();
   const currentId = useRef<string | undefined>(undefined);
+  const currentDownload = useRef<string | undefined>(undefined);
+  const [caption, setCaption] = useState<CaptionTrack>();
+  const [captionBusy, setCaptionBusy] = useState(false);
+  const [captionError, setCaptionError] = useState<string>();
+  const captionFile = useRef<{ track: CaptionTrack; uri: string } | undefined>(undefined);
+  const captionRequest = useRef<AbortController | undefined>(undefined);
+  const sourceVersion = useRef(0);
+  const sourceQueue = useRef<Promise<void>>(Promise.resolve());
+  const resumeIntent = useRef<boolean | undefined>(undefined);
+  const positionIntent = useRef<number | undefined>(undefined);
+  const qualityRef = useRef<number | undefined>(undefined);
+
+  // Native Ersetzungen serialisieren: schnelles Umschalten darf keine alte Quelle zurückholen.
+  const replaceSource = useCallback(
+    (
+      source: PlaybackSource,
+      id: string,
+      details: VideoDetails | undefined,
+      version: number,
+      position?: number,
+    ) => {
+      const isCurrent = () => currentId.current === id && sourceVersion.current === version;
+      const next = sourceQueue.current
+        .catch(() => {})
+        .then(async () => {
+          if (!isCurrent()) return;
+          resumeIntent.current ??= player.playing;
+          positionIntent.current ??= position ?? player.currentTime;
+          try {
+            await playSource(player, source, details, positionIntent.current, {
+              isCurrent,
+              resume: resumeIntent.current,
+            });
+          } finally {
+            if (isCurrent()) {
+              resumeIntent.current = undefined;
+              positionIntent.current = undefined;
+            }
+          }
+        });
+      sourceQueue.current = next;
+      return next;
+    },
+    [player],
+  );
+
+  useEffect(() => {
+    const select = () => {
+      const active = captionFile.current;
+      const track =
+        active &&
+        player.availableSubtitleTracks.find(
+          (t) => t.id?.endsWith('flimmer-subtitles') && t.language === active.track.language,
+        );
+      setPlayerSubtitle(player, track ?? null);
+    };
+    const loaded = player.addListener('sourceLoad', select);
+    const tracks = player.addListener('availableSubtitleTracksChange', select);
+    return () => {
+      loaded.remove();
+      tracks.remove();
+      captionRequest.current?.abort();
+    };
+  }, [player]);
 
   // Einstellung „Im Hintergrund weiterspielen“ live übernehmen
   useEffect(() => {
@@ -96,15 +169,29 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
   }, [player, playback]);
 
   const reset = useCallback(() => {
+    captionRequest.current?.abort();
+    captionRequest.current = undefined;
+    captionFile.current = undefined;
+    sourceVersion.current++;
+    resumeIntent.current = undefined;
+    positionIntent.current = undefined;
+    qualityRef.current = undefined;
+    setCaption(undefined);
+    setCaptionBusy(false);
+    setCaptionError(undefined);
+    setPlayerSubtitle(player, null);
     setStream({ kind: 'loading' });
     setSegments([]);
     setQualities(undefined);
     setQuality(undefined);
-  }, []);
+  }, [player]);
 
   const loadVideo = useCallback(
-    (id: string) => {
-      if (currentId.current === id) return;
+    (id: string, downloadId?: string) => {
+      if (currentId.current === id && (!downloadId || currentDownload.current === downloadId))
+        return;
+      if (currentId.current === id) setAttempt((n) => n + 1);
+      currentDownload.current = downloadId;
       currentId.current = id;
       readyId.current = undefined;
       autoAdvanceBlocked.current = false;
@@ -139,12 +226,12 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
   );
 
   const open = useCallback(
-    (id: string, playlistId?: string) => {
+    (id: string, playlistId?: string, downloadId?: string) => {
       // Eine wieder geöffnete Video-Seite folgt der inzwischen weitergelaufenen Liste.
       if (playlistId && playlistRef.current?.id === playlistId) return;
       if (playlistId && playPlaylist(playlistId, id)) return;
       leavePlaylist();
-      loadVideo(id);
+      loadVideo(id, downloadId);
     },
     [leavePlaylist, loadVideo, playPlaylist],
   );
@@ -160,6 +247,7 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
 
   const close = useCallback(() => {
     currentId.current = undefined;
+    currentDownload.current = undefined;
     readyId.current = undefined;
     leavePlaylist();
     setSleepTimerState(undefined);
@@ -250,9 +338,9 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
   }, [player, activeSleep, stepPlaylist]);
 
   const retry = useCallback(() => {
-    setStream({ kind: 'loading' });
+    reset();
     setAttempt((n) => n + 1);
-  }, []);
+  }, [reset]);
 
   // Stream und SponsorBlock-Segmente laden, sobald ein neues Video gewählt wird
   useEffect(() => {
@@ -261,14 +349,26 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
 
     async function loadStream(id: string) {
       try {
-        const result = await videoSource.getStreams(id);
+        const result =
+          (await downloads.playback(id, currentDownload.current)) ??
+          (await videoSource.getStreams(id));
         if (cancelled) return;
         const history = library.get().history.find((h) => h.video.id === id);
         const savedPosition =
           history && !result.details?.isLive
             ? resumablePosition(history.position, result.details?.durationSeconds ?? 0)
             : undefined;
-        await playSource(player, result.source, result.details, savedPosition);
+        const initial = sourceQueue.current
+          .catch(() => {})
+          .then(async () => {
+            if (cancelled) return;
+            await playSource(player, result.source, result.details, savedPosition, {
+              isCurrent: () => !cancelled && currentId.current === id,
+              resume: true,
+            });
+          });
+        sourceQueue.current = initial;
+        await initial;
         if (cancelled) return;
         readyId.current = id;
         setStream({ kind: 'ready', result });
@@ -285,7 +385,8 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
     }
 
     async function loadSegments(id: string) {
-      const result = await fetchSegments(id).catch(() => []);
+      const local = downloads.find(id, currentDownload.current);
+      const result = local ? (local.segments ?? []) : await fetchSegments(id).catch(() => []);
       if (!cancelled) setSegments(result);
     }
 
@@ -301,14 +402,114 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
 
   const chooseQuality = useCallback(
     async (height: number | undefined) => {
-      if (stream.kind !== 'ready' || !qualities || !videoId || height === quality) return;
+      if (stream.kind !== 'ready' || !qualities || !videoId || height === quality || captionBusy)
+        return;
+      const previous = qualityRef.current;
+      qualityRef.current = height;
       setQuality(height);
-      const position = player.currentTime;
-      const source = await sourceForQuality(stream.result.source, qualities, height, videoId);
-      if (currentId.current !== videoId) return;
-      await playSource(player, source, stream.result.details, position);
+      const version = ++sourceVersion.current;
+      try {
+        const source = await sourceForQuality(stream.result.source, qualities, height, videoId);
+        if (sourceVersion.current !== version || currentId.current !== videoId) return;
+        const active = captionFile.current;
+        await replaceSource(
+          {
+            ...source,
+            externalSubtitles: active
+              ? [
+                  {
+                    uri: active.uri,
+                    language: active.track.language,
+                    label: active.track.name,
+                  },
+                ]
+              : undefined,
+          },
+          videoId,
+          stream.result.details,
+          version,
+        );
+      } catch {
+        if (sourceVersion.current === version && currentId.current === videoId) {
+          qualityRef.current = previous;
+          setQuality(previous);
+          setCaptionError(
+            'Die Wiedergabe konnte nicht umgeschaltet werden. Bitte erneut versuchen.',
+          );
+        }
+      }
     },
-    [stream, qualities, quality, player, videoId],
+    [stream, qualities, quality, captionBusy, videoId, replaceSource],
+  );
+
+  const chooseCaption = useCallback(
+    async (track: CaptionTrack | undefined) => {
+      if (stream.kind !== 'ready' || !videoId || (track && track.videoId !== videoId)) return;
+      captionRequest.current?.abort();
+      const request = new AbortController();
+      captionRequest.current = request;
+      setCaptionError(undefined);
+      if (!track) {
+        captionRequest.current = undefined;
+        captionFile.current = undefined;
+        setCaption(undefined);
+        setCaptionBusy(false);
+        setPlayerSubtitle(player, null);
+        return;
+      }
+      setCaptionBusy(true);
+      const timeout = setTimeout(() => request.abort(), 20_000);
+      try {
+        const uri = await loadCaption(track, request.signal);
+        if (request.signal.aborted || currentId.current !== videoId) return;
+        const previous = captionFile.current;
+        const version = ++sourceVersion.current;
+        const source = qualities
+          ? await sourceForQuality(stream.result.source, qualities, qualityRef.current, videoId)
+          : stream.result.source;
+        if (
+          request.signal.aborted ||
+          currentId.current !== videoId ||
+          sourceVersion.current !== version
+        )
+          return;
+        captionFile.current = { track, uri };
+        try {
+          await replaceSource(
+            {
+              ...source,
+              externalSubtitles: [
+                {
+                  uri,
+                  language: track.language,
+                  label: track.name,
+                },
+              ],
+            },
+            videoId,
+            stream.result.details,
+            version,
+          );
+          if (!request.signal.aborted && currentId.current === videoId) setCaption(track);
+        } catch (error) {
+          if (captionRequest.current === request) captionFile.current = previous;
+          throw error;
+        }
+      } catch (error) {
+        if (captionRequest.current === request && currentId.current === videoId)
+          setCaptionError(
+            request.signal.aborted
+              ? 'Untertitel-Abruf hat zu lange gedauert. Bitte erneut versuchen.'
+              : error instanceof Error
+                ? error.message
+                : 'Untertitel konnten nicht geladen werden.',
+          );
+      } finally {
+        clearTimeout(timeout);
+        if (captionRequest.current === request) setCaptionBusy(false);
+      }
+    },
+    [stream, videoId, qualities, player, replaceSource],
   );
 
   const value = useMemo<NowPlaying>(
@@ -327,6 +528,10 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
       leavePlaylist,
       retry,
       chooseQuality,
+      caption,
+      captionBusy,
+      captionError,
+      chooseCaption,
       close,
       sleepTimer: activeSleep,
       setSleepTimer,
@@ -346,6 +551,10 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
       leavePlaylist,
       retry,
       chooseQuality,
+      caption,
+      captionBusy,
+      captionError,
+      chooseCaption,
       close,
       activeSleep,
       setSleepTimer,
