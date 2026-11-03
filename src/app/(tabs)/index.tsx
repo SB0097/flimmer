@@ -1,5 +1,5 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { router, useScrollToTop } from 'expo-router';
+import { useRouter, useScrollToTop } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import Animated from 'react-native-reanimated';
@@ -17,6 +17,7 @@ import { parseVideoId } from '@/lib/youtube-url';
 import { videoSource, type SearchPage, type VideoSummary } from '@/services/video-source';
 
 export default function HomeScreen() {
+  const router = useRouter();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const chrome = useScrollingChrome('home', insets.top + 104);
@@ -73,7 +74,7 @@ export default function HomeScreen() {
     } finally {
       if (request.current === token) setLoading(false);
     }
-  }, [query]);
+  }, [query, router]);
   const loadMore = useCallback(async () => {
     if (!nextPage.current || busy.current) return;
     const token = request.current;

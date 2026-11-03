@@ -36,6 +36,13 @@ export default function RootLayout() {
             }}
           />
           <Stack.Screen name="settings" options={{ title: 'Einstellungen' }} />
+          <Stack.Screen
+            name="import"
+            options={{
+              title: 'YouTube-Daten importieren',
+              statusBarStyle: colorScheme === 'dark' ? 'light' : 'dark',
+            }}
+          />
           <Stack.Screen name="channel/[id]" options={{ title: 'Kanal' }} />
           <Stack.Screen
             name="playlists"

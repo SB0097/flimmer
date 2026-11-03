@@ -1,6 +1,6 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Image } from 'expo-image';
-import { router, useScrollToTop } from 'expo-router';
+import { useRouter, useScrollToTop } from 'expo-router';
 import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -29,6 +29,7 @@ import type { VideoSummary } from '@/services/video-source';
 type Tab = 'Verlauf' | 'Favoriten' | 'Abos';
 
 export default function LibraryScreen() {
+  const router = useRouter();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
   const chrome = useScrollingChrome('library', insets.top + 120);
@@ -136,6 +137,16 @@ export default function LibraryScreen() {
               <MaterialIcons name="chevron-right" size={24} color={theme.textSecondary} />
             </Pressable>
             <LibraryError />
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => router.push('/import')}
+              style={styles.playlists}>
+              <MaterialIcons name="file-upload" size={26} color={theme.text} />
+              <ThemedText type="smallBold" style={styles.flex}>
+                YouTube-Daten importieren
+              </ThemedText>
+              <MaterialIcons name="chevron-right" size={24} color={theme.textSecondary} />
+            </Pressable>
             {tab === 'Verlauf' && saved.history.length ? (
               <Pressable accessibilityRole="button" onPress={clearHistory} style={styles.clear}>
                 <ThemedText type="smallBold">Verlauf löschen</ThemedText>
@@ -193,7 +204,9 @@ export default function LibraryScreen() {
                 <View style={styles.itemActions}>
                   <ThemedText type="small" themeColor="textSecondary" style={styles.flex}>
                     {history
-                      ? `${new Date(history.lastWatchedAt).toLocaleDateString('de-DE')} · ${formatDuration(history.position)}${item.durationSeconds ? ` / ${formatDuration(item.durationSeconds)}` : ''}`
+                      ? history.imported
+                        ? `Importiert · ${history.lastWatchedAt ? new Date(history.lastWatchedAt).toLocaleDateString('de-DE') : 'Zeitpunkt unbekannt'}`
+                        : `${new Date(history.lastWatchedAt).toLocaleDateString('de-DE')} · ${formatDuration(history.position)}${item.durationSeconds ? ` / ${formatDuration(item.durationSeconds)}` : ''}`
                       : 'Lokal favorisiert'}
                   </ThemedText>
                   <Pressable

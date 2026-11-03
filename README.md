@@ -8,6 +8,7 @@ Werbefreier YouTube-Player für Android, gebaut mit Expo.
 - Lokale Bibliothek: Verlauf mit Sehpositionen, Favoriten und Kanal-Abos
 - Kanalseiten und eine persönliche „Für dich“-Startseite ohne Google-Login
 - Eigene Playlists mit sortierbaren Videos und fortlaufender Wiedergabe
+- Lokaler Import von Abos, Verlauf und Playlists aus Google Takeout
 
 ## Bibliothek und Startseite
 
@@ -48,6 +49,24 @@ Die gestartete Reihenfolge bleibt für die laufende Wiedergabe erhalten. Änderu
 gespeicherten Playlist gelten beim nächsten Start der Liste. Playlists überstehen App-Neustarts;
 sie speichern Videoeinträge, keine heruntergeladenen Videodateien. Zum Abspielen ist weiterhin
 eine Internetverbindung erforderlich.
+
+## YouTube-Takeout-Import
+
+Unter **Bibliothek → YouTube-Daten importieren** wählst du dein Takeout-ZIP oder entpackte
+Exportdateien aus: Abos als `subscriptions.csv`, Wiedergabeverlauf als JSON oder HTML und
+Playlists als CSV. Exportiere bei [Google Takeout](https://takeout.google.com/) nur die
+gewünschten YouTube-Daten ohne Videodateien. Es sind höchstens 64 MB auf einmal möglich;
+große Archive kannst du vorher entpacken und die gewünschten Dateien einzeln auswählen.
+
+Flimmer zeigt vor dem Hinzufügen eine Vorschau. Die Verarbeitung bleibt auf dem Gerät.
+Vorhandene Abos, Playlist-Namen/-Reihenfolgen und Sehpositionen gleicher Videos werden nicht
+überschrieben. Derselbe Export kann erneut eingelesen werden, ohne doppelte Einträge anzulegen.
+Der Verlauf enthält wie bisher höchstens die 1.000 neuesten unterschiedlichen Videos.
+
+Takeout enthält keine genauen Sehpositionen oder angesehenen Dauern. Importierter Verlauf
+wird deshalb gekennzeichnet und als Interesse für „Für dich“ berücksichtigt. Bei unbekannten
+HTML-Datumsformaten steht „Zeitpunkt unbekannt“. Fehlende Metadaten von Playlist-Videos
+werden beim späteren Öffnen ergänzt. Für den Import ist kein Google-Login in Flimmer nötig.
 
 > 🚧 Frühe Entwicklungsphase
 

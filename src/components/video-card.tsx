@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { Link, router } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
@@ -12,6 +12,7 @@ import type { VideoSummary } from '@/services/video-source';
 
 /** Video-Kachel im YouTube-Stil: großes Vorschaubild, darunter Titel und Kanal */
 export function VideoCard({ video }: { video: VideoSummary }) {
+  const router = useRouter();
   const theme = useTheme();
   const meta = [video.channel.name, video.viewCountText, video.publishedText]
     .filter(Boolean)

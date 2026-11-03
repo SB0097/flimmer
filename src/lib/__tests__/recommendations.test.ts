@@ -20,6 +20,13 @@ const history = (id: string, watchedSeconds: number): HistoryEntry => ({
 });
 const favorite = (id: string): Favorite => ({ video: video(id), savedAt: 1 });
 
+it('nutzt Takeout-Verlauf als Interesse, ohne eine angesehene Dauer zu erfinden', () => {
+  const imported = { ...history('importiert', 0), imported: true };
+  expect(watchWeight(imported)).toBe(1.5);
+  expect(recommendationSeeds([imported], [])).toEqual([['importiert', 1.5]]);
+  expect(imported.watchedSeconds).toBe(0);
+});
+
 it('filtert Gesehenes und doppelte Kandidaten aus allen Quellen', () => {
   const batches = [
     { key: 'a', weight: 3, items: [video('seen'), video('new')] },
