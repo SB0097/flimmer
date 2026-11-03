@@ -1,7 +1,7 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Image } from 'expo-image';
-import { router } from 'expo-router';
-import { useState } from 'react';
+import { router, useScrollToTop } from 'expo-router';
+import { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,23 +11,29 @@ import {
   StyleSheet,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated from 'react-native-reanimated';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LibraryError } from '@/components/library-actions';
-import { MiniPlayer } from '@/components/mini-player';
+import { ScrollStatusBar, useScrollingChrome } from '@/components/scroll-chrome';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { VideoCard } from '@/components/video-card';
-import { BottomTabInset, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
 import { useForYou } from '@/hooks/use-for-you';
 import { useTheme } from '@/hooks/use-theme';
 import { formatDuration } from '@/lib/format';
 import { library, useLibrary } from '@/services/library/store';
+import type { VideoSummary } from '@/services/video-source';
 
 type Tab = 'Verlauf' | 'Favoriten' | 'Abos';
 
 export default function LibraryScreen() {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const chrome = useScrollingChrome('library', insets.top + 120);
+  const list = useRef<FlatList<VideoSummary>>(null);
+  useScrollToTop(list);
   const saved = useLibrary();
   const [tab, setTab] = useState<Tab>('Verlauf');
   const feed = useForYou({ enabled: tab === 'Abos', subscriptionsOnly: true });
@@ -55,44 +61,59 @@ export default function LibraryScreen() {
 
   return (
     <ThemedView style={styles.flex}>
-      <SafeAreaView edges={['top']} style={styles.header}>
-        <View style={styles.row}>
-          <ThemedText type="title" style={styles.flex}>
-            Bibliothek
-          </ThemedText>
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Einstellungen öffnen"
-            onPress={() => router.push('/settings')}
-            style={styles.icon}>
-            <MaterialIcons name="settings" size={24} color={theme.text} />
-          </Pressable>
-        </View>
-        <View style={styles.row}>
-          {(['Verlauf', 'Favoriten', 'Abos'] as Tab[]).map((name) => (
+      <Animated.View
+        onLayout={chrome.onHeaderLayout}
+        style={[styles.headerOverlay, { backgroundColor: theme.background }, chrome.headerStyle]}>
+        <SafeAreaView edges={['top']} style={styles.header}>
+          <View style={styles.row}>
+            <ThemedText type="title" style={styles.flex}>
+              Bibliothek
+            </ThemedText>
             <Pressable
-              key={name}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: tab === name }}
-              onPress={() => setTab(name)}
-              style={[
-                styles.tab,
-                {
-                  backgroundColor:
-                    tab === name ? theme.backgroundSelected : theme.backgroundElement,
-                },
-              ]}>
-              <ThemedText type="smallBold">
-                {name} · {counts[name]}
-              </ThemedText>
+              accessibilityRole="button"
+              accessibilityLabel="Einstellungen öffnen"
+              onPress={() => router.push('/settings')}
+              style={styles.icon}>
+              <MaterialIcons name="settings" size={24} color={theme.text} />
             </Pressable>
-          ))}
-        </View>
-      </SafeAreaView>
-      <FlatList
+          </View>
+          <View style={styles.row}>
+            {(['Verlauf', 'Favoriten', 'Abos'] as Tab[]).map((name) => (
+              <Pressable
+                key={name}
+                accessibilityRole="tab"
+                accessibilityState={{ selected: tab === name }}
+                onPress={() => {
+                  chrome.show();
+                  list.current?.scrollToOffset({ offset: 0, animated: false });
+                  setTab(name);
+                }}
+                style={[
+                  styles.tab,
+                  {
+                    backgroundColor:
+                      tab === name ? theme.backgroundSelected : theme.backgroundElement,
+                  },
+                ]}>
+                <ThemedText type="smallBold">
+                  {name} · {counts[name]}
+                </ThemedText>
+              </Pressable>
+            ))}
+          </View>
+        </SafeAreaView>
+      </Animated.View>
+      <Animated.FlatList
+        ref={list}
+        onScroll={chrome.onScroll}
+        scrollEventThrottle={16}
         data={items}
         keyExtractor={(v) => v.id}
-        contentContainerStyle={styles.content}
+        contentContainerStyle={{
+          paddingTop: chrome.headerHeight,
+          paddingBottom: chrome.barHeight + 160,
+        }}
+        progressViewOffset={chrome.headerHeight}
         refreshing={tab === 'Abos' && feed.loading}
         onRefresh={
           tab === 'Abos'
@@ -204,7 +225,7 @@ export default function LibraryScreen() {
           )
         }
       />
-      <MiniPlayer />
+      <ScrollStatusBar />
     </ThemedView>
   );
 }
@@ -227,7 +248,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   icon: { width: 44, height: 44, justifyContent: 'center', alignItems: 'center' },
-  content: { paddingBottom: BottomTabInset + 160 },
+  headerOverlay: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1 },
   clear: { alignSelf: 'flex-end', padding: Spacing.three, minHeight: 44 },
   message: { padding: Spacing.four, textAlign: 'center' },
   channels: { padding: Spacing.three, gap: Spacing.three },
