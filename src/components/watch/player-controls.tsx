@@ -14,6 +14,8 @@ import {
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
 import { formatDuration } from '@/lib/format';
+import { CATEGORY_INFO, type Segment } from '@/lib/segments';
+import { useSponsorSettings } from '@/services/settings/sponsor-settings';
 import {
   clampSeekTarget,
   DEFAULT_TAP_SEEK,
@@ -34,6 +36,10 @@ interface Props {
   onOpenSettings?: () => void;
   /** Kurzlabel neben dem Zahnrad, z. B. „720p“ oder „Auto“ */
   qualityLabel?: string;
+  /** SponsorBlock-Segmente für farbige Markierungen im Fortschrittsbalken */
+  segments?: Segment[];
+  /** Während des Ladens nur der Ladekreis, kein Play-Knopf dahinter (wie YouTube) */
+  isLoading?: boolean;
 }
 
 /**
@@ -48,7 +54,11 @@ export function PlayerControls({
   onFullscreen,
   onOpenSettings,
   qualityLabel,
+  segments = [],
+  isLoading = false,
 }: Props) {
+  const sponsorSettings = useSponsorSettings();
+  const markers = segments.filter((seg) => sponsorSettings[seg.category] !== 'off');
   const { isPlaying } = useEvent(player, 'playingChange', { isPlaying: player.playing });
   const { currentTime, bufferedPosition } = useEvent(player, 'timeUpdate', {
     currentTime: player.currentTime,
@@ -62,25 +72,21 @@ export function PlayerControls({
   const [seekHint, setSeekHint] = useState<{ side: 'left' | 'right'; total: number }>();
   const [dragFraction, setDragFraction] = useState<number>();
   const [width, setWidth] = useState(0);
+  /** Zählt Bedienungen; jede startet den Ausblende-Timer neu */
+  const [interaction, setInteraction] = useState(0);
+  const touch = useCallback(() => setInteraction((n) => n + 1), []);
 
   const tapState = useRef<TapState>({});
-  const singleTapTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const seekHintTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  // Steuerung beim Abspielen nach einigen Sekunden ausblenden
+  // Steuerung beim Abspielen nach einigen Sekunden ohne Bedienung ausblenden
   useEffect(() => {
     if (!visible || !isPlaying || dragFraction !== undefined) return;
     const t = setTimeout(() => setVisible(false), HIDE_AFTER_MS);
     return () => clearTimeout(t);
-  }, [visible, isPlaying, dragFraction, currentTime]);
+  }, [visible, isPlaying, dragFraction, interaction]);
 
-  useEffect(
-    () => () => {
-      clearTimeout(singleTapTimer.current);
-      clearTimeout(seekHintTimer.current);
-    },
-    [],
-  );
+  useEffect(() => () => clearTimeout(seekHintTimer.current), []);
 
   const onSurfacePress = useCallback(
     (e: GestureResponderEvent) => {
@@ -89,7 +95,8 @@ export function PlayerControls({
       tapState.current = state;
 
       if (action.type === 'seek') {
-        clearTimeout(singleTapTimer.current);
+        // Beim Spulen nur den Hinweis zeigen, nicht die Steuerung
+        setVisible(false);
         const target = clampSeekTarget(player.currentTime, action.seconds, player.duration);
         player.seekBy(target - player.currentTime);
         setSeekHint({ side: action.side, total: action.total });
@@ -101,20 +108,19 @@ export function PlayerControls({
         return;
       }
 
-      clearTimeout(singleTapTimer.current);
-      singleTapTimer.current = setTimeout(
-        () => setVisible((v) => !v),
-        DEFAULT_TAP_SEEK.doubleTapMs,
-      );
+      // Einzeltipp sofort umsetzen; folgt ein zweiter Tipp, wird oben gespult
+      setVisible((v) => !v);
+      touch();
     },
-    [player, width],
+    [player, width, touch],
   );
 
   const togglePlay = useCallback(() => {
     if (player.playing) player.pause();
     else player.play();
     setVisible(true);
-  }, [player]);
+    touch();
+  }, [player, touch]);
 
   return (
     <View
@@ -131,13 +137,15 @@ export function PlayerControls({
       {visible && !seekHint ? (
         <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, styles.scrim]}>
           <View pointerEvents="box-none" style={styles.center}>
-            <Pressable
-              onPress={togglePlay}
-              style={styles.playButton}
-              accessibilityRole="button"
-              accessibilityLabel={isPlaying ? 'Pause' : 'Abspielen'}>
-              <MaterialIcons name={isPlaying ? 'pause' : 'play-arrow'} size={44} color="#fff" />
-            </Pressable>
+            {isLoading ? null : (
+              <Pressable
+                onPress={togglePlay}
+                style={styles.playButton}
+                accessibilityRole="button"
+                accessibilityLabel={isPlaying ? 'Pause' : 'Abspielen'}>
+                <MaterialIcons name={isPlaying ? 'pause' : 'play-arrow'} size={44} color="#fff" />
+              </Pressable>
+            )}
           </View>
 
           <View pointerEvents="box-none" style={styles.bottomRow}>
@@ -160,11 +168,14 @@ export function PlayerControls({
             <View style={styles.rightButtons}>
               {onOpenSettings ? (
                 <Pressable
-                  onPress={onOpenSettings}
+                  onPress={() => {
+                    touch();
+                    onOpenSettings();
+                  }}
                   hitSlop={10}
                   style={styles.settings}
                   accessibilityRole="button"
-                  accessibilityLabel="Qualität">
+                  accessibilityLabel="Einstellungen">
                   <MaterialIcons name="settings" size={22} color="#fff" />
                   {qualityLabel ? (
                     <ThemedText type="smallBold" style={[styles.white, styles.qualityLabel]}>
@@ -191,8 +202,15 @@ export function PlayerControls({
         </View>
       ) : null}
 
-      {!isLive && duration > 0 ? (
+      {/* Im Vollbild nur zusammen mit der Steuerung zeigen, im Hochformat immer (wie YouTube) */}
+      {!isLive && duration > 0 && (visible || !isFullscreen) ? (
         <SeekBar
+          markers={markers.map((seg) => ({
+            key: seg.uuid,
+            from: seg.start / duration,
+            to: seg.end / duration,
+            color: CATEGORY_INFO[seg.category].color,
+          }))}
           fraction={dragFraction ?? currentTime / duration}
           buffered={bufferedPosition / duration}
           showThumb={visible}
@@ -228,6 +246,7 @@ function SeekHint({ side, total }: { side: 'left' | 'right'; total: number }) {
 }
 
 interface SeekBarProps {
+  markers: { key: string; from: number; to: number; color: string }[];
   fraction: number;
   buffered: number;
   showThumb: boolean;
@@ -235,7 +254,7 @@ interface SeekBarProps {
   onRelease: (fraction: number) => void;
 }
 
-function SeekBar({ fraction, buffered, showThumb, onDrag, onRelease }: SeekBarProps) {
+function SeekBar({ markers, fraction, buffered, showThumb, onDrag, onRelease }: SeekBarProps) {
   const width = useRef(0);
   const startX = useRef(0);
   const callbacks = useRef({ onDrag, onRelease });
@@ -276,6 +295,15 @@ function SeekBar({ fraction, buffered, showThumb, onDrag, onRelease }: SeekBarPr
       <View style={styles.seekTrack} pointerEvents="none">
         <View style={[styles.seekBuffered, { width: clamp(buffered) }]} />
         <View style={[styles.seekProgress, { width: clamp(fraction) }]} />
+        {markers.map((m) => (
+          <View
+            key={m.key}
+            style={[
+              styles.seekMarker,
+              { left: clamp(m.from), width: clamp(m.to - m.from), backgroundColor: m.color },
+            ]}
+          />
+        ))}
       </View>
       {showThumb ? (
         <View pointerEvents="none" style={[styles.seekThumb, { left: clamp(fraction) }]} />
@@ -383,6 +411,12 @@ const styles = StyleSheet.create({
     top: 0,
     bottom: 0,
     backgroundColor: RED,
+  },
+  seekMarker: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    opacity: 0.9,
   },
   seekThumb: {
     position: 'absolute',

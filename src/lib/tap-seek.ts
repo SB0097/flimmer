@@ -1,6 +1,6 @@
 /**
  * Tipp-Logik des Players wie bei YouTube:
- * - einmal tippen → Steuerung ein-/ausblenden (verzögert, falls ein zweiter Tipp folgt)
+ * - einmal tippen → Steuerung sofort ein-/ausblenden
  * - links/rechts doppeltippen → 10 s zurück/vor
  * - danach jeder weitere Tipp auf derselben Seite (solange der Spul-Modus läuft) → weitere 10 s
  */
@@ -27,7 +27,7 @@ export interface TapState {
 export type TapAction =
   /** Sofort spulen; `total` = bisher in dieser Serie gespulte Sekunden (für die Anzeige) */
   | { type: 'seek'; side: 'left' | 'right'; seconds: number; total: number }
-  /** Möglicher Einzeltipp: nach `doubleTapMs` ohne weiteren Tipp ausführen */
+  /** Einzeltipp (kann der erste Tipp eines Doppeltipps sein) */
   | { type: 'single-pending' };
 
 /** Linkes und rechtes Drittel spulen, die Mitte nie */

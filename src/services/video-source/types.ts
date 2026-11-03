@@ -116,9 +116,16 @@ export interface SearchPage {
   next?: () => Promise<SearchPage>;
 }
 
+export interface ChannelPage extends SearchPage {
+  channel: ChannelRef;
+  description: string;
+}
+
 export interface VideoSource {
   readonly name: string;
   search(query: string): Promise<SearchPage>;
+  getHome(): Promise<SearchPage>;
+  getChannel(id: string): Promise<ChannelPage>;
   getStreams(id: string): Promise<StreamResult>;
   getWatchPage(id: string): Promise<WatchPage>;
   getComments(id: string, sort: CommentSort): Promise<CommentsResult>;

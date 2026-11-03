@@ -1,142 +1,239 @@
+import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { router } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, StyleSheet, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { LibraryError } from '@/components/library-actions';
+import { MiniPlayer } from '@/components/mini-player';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { VideoCard } from '@/components/video-card';
 import { BottomTabInset, Spacing } from '@/constants/theme';
+import { useForYou } from '@/hooks/use-for-you';
 import { useTheme } from '@/hooks/use-theme';
 import { parseVideoId } from '@/lib/youtube-url';
 import { videoSource, type SearchPage, type VideoSummary } from '@/services/video-source';
 
-export default function SearchScreen() {
+export default function HomeScreen() {
   const theme = useTheme();
+  const feed = useForYou();
   const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
   const [items, setItems] = useState<VideoSummary[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string>();
   const nextPage = useRef<SearchPage['next']>(undefined);
-  const loadingMore = useRef(false);
+  const busy = useRef(false);
+  const request = useRef(0);
 
+  const goHome = () => {
+    request.current++;
+    nextPage.current = undefined;
+    busy.current = false;
+    setQuery('');
+    setSearching(false);
+    setLoading(false);
+    setLoadingMore(false);
+    setError(undefined);
+  };
   const submit = useCallback(async () => {
     const text = query.trim();
     if (!text) return;
-
-    // Link oder Video-ID eingefügt → direkt abspielen
     const id = parseVideoId(text);
     if (id) {
       router.push({ pathname: '/watch/[id]', params: { id } });
       return;
     }
-
+    const token = ++request.current;
+    nextPage.current = undefined;
+    busy.current = false;
+    setSearching(true);
     setLoading(true);
+    setLoadingMore(false);
     setError(undefined);
+    setItems([]);
     try {
       const page = await videoSource.search(text);
+      if (request.current !== token) return;
       setItems(page.items);
       nextPage.current = page.next;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-      setItems([]);
+    } catch {
+      if (request.current === token)
+        setError('Suche fehlgeschlagen. Prüfe die Verbindung und versuche es erneut.');
     } finally {
-      setLoading(false);
+      if (request.current === token) setLoading(false);
     }
   }, [query]);
-
   const loadMore = useCallback(async () => {
-    if (!nextPage.current || loadingMore.current) return;
-    loadingMore.current = true;
+    if (!nextPage.current || busy.current) return;
+    const token = request.current;
+    busy.current = true;
+    setLoadingMore(true);
     try {
       const page = await nextPage.current();
+      if (request.current !== token) return;
       nextPage.current = page.next;
-      setItems((prev) => {
-        const seen = new Set(prev.map((v) => v.id));
-        return [...prev, ...page.items.filter((v) => !seen.has(v.id))];
-      });
+      setItems((prev) => [...new Map([...prev, ...page.items].map((v) => [v.id, v])).values()]);
     } catch {
-      nextPage.current = undefined;
+      if (request.current === token)
+        setError('Weitere Ergebnisse konnten nicht geladen werden. Tippe auf „Erneut versuchen“.');
     } finally {
-      loadingMore.current = false;
+      if (request.current === token) {
+        busy.current = false;
+        setLoadingMore(false);
+      }
     }
   }, []);
 
+  const shown = searching ? items : feed.items;
+  const failure = searching ? error : feed.error;
   return (
     <ThemedView style={styles.container}>
       <SafeAreaView edges={['top']} style={styles.header}>
         <ThemedText type="subtitle">Flimmer</ThemedText>
-        <TextInput
-          value={query}
-          onChangeText={setQuery}
-          onSubmitEditing={submit}
-          placeholder="Suchen oder YouTube-Link einfügen"
-          placeholderTextColor={theme.textSecondary}
-          returnKeyType="search"
-          autoCorrect={false}
-          autoCapitalize="none"
-          accessibilityLabel="Suchen"
-          style={[styles.input, { color: theme.text, backgroundColor: theme.backgroundElement }]}
-        />
-      </SafeAreaView>
-
-      {loading ? (
-        <ActivityIndicator style={styles.center} size="large" />
-      ) : error ? (
-        <View style={styles.center}>
-          <ThemedText type="smallBold">Suche fehlgeschlagen</ThemedText>
-          <ThemedText type="small" themeColor="textSecondary" style={styles.centerText}>
-            {error}
-          </ThemedText>
+        <View style={[styles.searchRow, { backgroundColor: theme.backgroundElement }]}>
+          {searching ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Zur Startseite"
+              onPress={goHome}
+              style={styles.icon}>
+              <MaterialIcons name="arrow-back" size={22} color={theme.text} />
+            </Pressable>
+          ) : (
+            <MaterialIcons
+              name="search"
+              size={22}
+              color={theme.textSecondary}
+              style={styles.searchIcon}
+            />
+          )}
+          <TextInput
+            value={query}
+            onChangeText={(text) => {
+              if (!text) goHome();
+              else setQuery(text);
+            }}
+            onSubmitEditing={submit}
+            placeholder="Suchen oder YouTube-Link einfügen"
+            placeholderTextColor={theme.textSecondary}
+            returnKeyType="search"
+            autoCorrect={false}
+            autoCapitalize="none"
+            accessibilityLabel="Suchen"
+            style={[styles.input, { color: theme.text }]}
+          />
+          {query ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Suche leeren"
+              onPress={goHome}
+              style={styles.icon}>
+              <MaterialIcons name="close" size={20} color={theme.textSecondary} />
+            </Pressable>
+          ) : null}
         </View>
-      ) : (
-        <FlatList
-          data={items}
-          keyExtractor={(v) => v.id}
-          renderItem={({ item }) => <VideoCard video={item} />}
-          onEndReached={loadMore}
-          onEndReachedThreshold={1.5}
-          contentContainerStyle={{ paddingBottom: BottomTabInset }}
-          keyboardDismissMode="on-drag"
-          ListEmptyComponent={
+      </SafeAreaView>
+      <FlatList
+        data={shown}
+        keyExtractor={(v) => v.id}
+        renderItem={({ item }) => <VideoCard video={item} />}
+        onEndReached={() => {
+          if (searching && !error) void loadMore();
+        }}
+        onEndReachedThreshold={1.5}
+        refreshing={!searching && feed.loading && shown.length > 0}
+        onRefresh={
+          searching
+            ? undefined
+            : () => {
+                void feed.refresh();
+              }
+        }
+        contentContainerStyle={styles.content}
+        keyboardDismissMode="on-drag"
+        ListHeaderComponent={
+          <View style={styles.heading}>
+            {!searching ? (
+              <>
+                <ThemedText type="subtitle">
+                  {feed.personalized ? 'Für dich' : 'Entdecken'}
+                </ThemedText>
+                <ThemedText type="small" themeColor="textSecondary">
+                  {feed.personalized
+                    ? 'Aus deinen Abos, Favoriten und angesehenen Videos zusammengestellt.'
+                    : 'Mit deinen ersten Videos, Favoriten und Abos wird diese Seite persönlicher.'}
+                </ThemedText>
+              </>
+            ) : null}
+            <LibraryError />
+            {failure ? (
+              <>
+                <ThemedText type="small" themeColor="textSecondary">
+                  {failure}
+                </ThemedText>
+                <Pressable
+                  accessibilityRole="button"
+                  style={styles.retry}
+                  onPress={
+                    searching
+                      ? () => {
+                          setError(undefined);
+                          if (items.length) void loadMore();
+                          else void submit();
+                        }
+                      : () => {
+                          void feed.refresh();
+                        }
+                  }>
+                  <ThemedText type="smallBold">Erneut versuchen</ThemedText>
+                </Pressable>
+              </>
+            ) : null}
+          </View>
+        }
+        ListEmptyComponent={
+          (searching ? loading : feed.loading) ? (
+            <ActivityIndicator style={styles.hint} size="large" />
+          ) : !failure ? (
             <ThemedText type="small" themeColor="textSecondary" style={styles.hint}>
-              Suchbegriff eingeben oder einen YouTube-Link einfügen.
+              {searching
+                ? 'Keine Videos gefunden. Versuche einen anderen Suchbegriff.'
+                : 'Gerade keine neuen Vorschläge. Ziehe zum Aktualisieren nach unten oder nutze die Suche.'}
             </ThemedText>
-          }
-        />
-      )}
+          ) : undefined
+        }
+        ListFooterComponent={
+          loadingMore && searching ? <ActivityIndicator style={styles.hint} /> : undefined
+        }
+      />
+      <MiniPlayer />
     </ThemedView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
+  container: { flex: 1 },
   header: {
     paddingHorizontal: Spacing.three,
     paddingTop: Spacing.two,
     paddingBottom: Spacing.three,
     gap: Spacing.two,
   },
+  searchRow: { flexDirection: 'row', alignItems: 'center', borderRadius: 24, minHeight: 48 },
+  icon: { width: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  searchIcon: { marginLeft: Spacing.three, marginRight: Spacing.two },
   input: {
-    borderRadius: 20,
-    paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two + Spacing.one,
-    fontSize: 16,
-  },
-  center: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: Spacing.four,
-    gap: Spacing.two,
+    minWidth: 0,
+    paddingVertical: Spacing.two + Spacing.one,
+    paddingRight: Spacing.two,
+    fontSize: 15,
   },
-  centerText: {
-    textAlign: 'center',
-  },
-  hint: {
-    padding: Spacing.three,
-    textAlign: 'center',
-  },
+  heading: { paddingHorizontal: Spacing.three, paddingBottom: Spacing.three, gap: Spacing.two },
+  content: { paddingBottom: BottomTabInset + 160 },
+  retry: { minHeight: 44, justifyContent: 'center' },
+  hint: { padding: Spacing.four, textAlign: 'center' },
 });

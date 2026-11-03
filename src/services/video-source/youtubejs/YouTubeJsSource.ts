@@ -7,6 +7,8 @@ import {
   type CommentSort,
   type CommentsPage,
   type CommentsResult,
+  type ChannelPage,
+  type ChannelRef,
   type RelatedPage,
   type WatchPage,
   type SearchPage,
@@ -20,7 +22,7 @@ import {
 import { applyClientOverrides } from './client-overrides';
 import { evaluatePlayerScript } from './evaluator';
 import { toComment, type CommentViewLike } from './comments';
-import { lockupToSummary, type LockupLike } from './lockup';
+import { lockupToSummary, parseDurationText, type LockupLike } from './lockup';
 import { planSource } from './select-source';
 
 type Client = Types.InnerTubeClient;
@@ -73,6 +75,54 @@ export class YouTubeJsSource implements VideoSource {
     const yt = await this.getInnertube();
     const result = await yt.search(query, { type: 'video' });
     return toSearchPage(result);
+  }
+
+  async getHome(): Promise<SearchPage> {
+    const yt = await this.getInnertube();
+    const home = await yt
+      .getHomeFeed()
+      .then(toFeedPage)
+      .catch(() => undefined);
+    if (home?.items.length) return home;
+    // YouTube zeigt Gästen mitunter eine leere Startseite. Dann breit gestreute
+    // öffentliche Suchergebnisse nutzen, bis lokale Interessen vorhanden sind.
+    const topics = ['Wissen Dokumentation', 'Musik live', 'Technik', 'Gaming', 'Kochen', 'Sport'];
+    const day = Math.floor(Date.now() / 86_400_000);
+    const results = await Promise.allSettled(
+      [0, 1, 2].map((offset) => this.search(topics[(day + offset * 2) % topics.length])),
+    );
+    const items = results.flatMap((r) =>
+      r.status === 'fulfilled' ? r.value.items.slice(0, 8) : [],
+    );
+    if (!items.length)
+      throw new Error(
+        'Allgemeine Vorschläge sind gerade nicht verfügbar. Versuche es mit der Suche.',
+      );
+    return { items: uniqueVideos(items) };
+  }
+
+  async getChannel(id: string): Promise<ChannelPage> {
+    const yt = await this.getInnertube();
+    const result = await yt.getChannel(id);
+    const metadata = result.metadata;
+    const header = result.header;
+    const subscriberCountText = header?.is(YTNodes.C4TabbedHeader)
+      ? header.subscribers?.toString()
+      : header?.is(YTNodes.PageHeader)
+        ? header.content?.metadata?.metadata_rows
+            .flatMap((row) => (row.metadata_parts ?? []).map((part) => part.text?.toString() ?? ''))
+            .find((text) => /Abonnenten|subscribers/i.test(text))
+        : undefined;
+    const channel: ChannelRef = {
+      id: metadata.external_id || id,
+      name: metadata.title || id,
+      avatar: (metadata.avatar ?? metadata.thumbnail)?.[0],
+      subscriberCountText,
+    };
+    const videos = result.has_videos
+      ? toFeedPage(await result.getVideos(), channel)
+      : { items: [] };
+    return { ...videos, channel, description: metadata.description ?? '' };
   }
 
   async getWatchPage(id: string): Promise<WatchPage> {
@@ -327,6 +377,60 @@ function toSearchPage(result: YT.Search): SearchPage {
     items,
     next: result.has_continuation
       ? async () => toSearchPage(await result.getContinuation())
+      : undefined,
+  };
+}
+
+interface VideoFeed {
+  videos: {
+    is: (
+      type:
+        | typeof YTNodes.Video
+        | typeof YTNodes.CompactVideo
+        | typeof YTNodes.GridVideo
+        | typeof YTNodes.LockupView,
+    ) => boolean;
+  }[];
+  has_continuation: boolean;
+  getContinuation(): Promise<VideoFeed>;
+}
+
+function uniqueVideos(items: VideoSummary[]): VideoSummary[] {
+  return [...new Map(items.map((video) => [video.id, video])).values()];
+}
+
+function toFeedPage(result: VideoFeed, channel?: ChannelRef): SearchPage {
+  const items = result.videos
+    .map((node): VideoSummary | undefined => {
+      if (node.is(YTNodes.LockupView))
+        return lockupToSummary(node as unknown as LockupLike, channel);
+      if (node.is(YTNodes.Video)) return toVideoSummary(node as YTNodes.Video);
+      if (node.is(YTNodes.CompactVideo)) return compactToSummary(node as YTNodes.CompactVideo);
+      if (node.is(YTNodes.GridVideo)) {
+        const video = node as YTNodes.GridVideo;
+        return {
+          id: video.video_id,
+          title: video.title.toString(),
+          channel: {
+            id: video.author.id,
+            name: video.author.name,
+            avatar: video.author.best_thumbnail,
+          },
+          thumbnails: toThumbnails(video.thumbnails),
+          durationSeconds: parseDurationText(video.duration?.toString()),
+          viewCountText: (video.short_view_count ?? video.views)?.toString(),
+          publishedText: video.published?.toString(),
+          isLive: false,
+        };
+      }
+      return undefined;
+    })
+    .filter((v): v is VideoSummary => v !== undefined)
+    .map((video) => (channel ? { ...video, channel } : video));
+  return {
+    items: uniqueVideos(items),
+    next: result.has_continuation
+      ? async () => toFeedPage(await result.getContinuation(), channel)
       : undefined,
   };
 }

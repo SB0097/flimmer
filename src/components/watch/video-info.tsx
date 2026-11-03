@@ -1,8 +1,10 @@
 import { Image } from 'expo-image';
+import { router } from 'expo-router';
 import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { FavoriteButton, LibraryError, SubscribeButton } from '@/components/library-actions';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { formatViewCount } from '@/lib/format';
@@ -48,22 +50,37 @@ export function VideoInfo({ details, comments, onOpenComments, diagnostics }: Pr
       </Pressable>
 
       <View style={styles.channelRow}>
-        {details.channel.avatar ? (
-          <Image source={details.channel.avatar.url} style={styles.avatar} />
-        ) : (
-          <View style={[styles.avatar, { backgroundColor: theme.backgroundSelected }]} />
-        )}
-        <View style={styles.channelText}>
-          <ThemedText type="smallBold" numberOfLines={1}>
-            {details.channel.name}
-          </ThemedText>
-          {details.channel.subscriberCountText ? (
-            <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
-              {details.channel.subscriberCountText}
+        <Pressable
+          style={styles.channelLink}
+          accessibilityRole="button"
+          accessibilityLabel={`Kanal öffnen: ${details.channel.name}`}
+          disabled={!details.channel.id}
+          onPress={() =>
+            router.push({ pathname: '/channel/[id]', params: { id: details.channel.id } })
+          }>
+          {details.channel.avatar ? (
+            <Image source={details.channel.avatar.url} style={styles.avatar} />
+          ) : (
+            <View style={[styles.avatar, { backgroundColor: theme.backgroundSelected }]} />
+          )}
+          <View style={styles.channelText}>
+            <ThemedText type="smallBold" numberOfLines={1}>
+              {details.channel.name}
             </ThemedText>
-          ) : null}
-        </View>
+            {details.channel.subscriberCountText ? (
+              <ThemedText type="small" themeColor="textSecondary" numberOfLines={1}>
+                {details.channel.subscriberCountText}
+              </ThemedText>
+            ) : null}
+          </View>
+        </Pressable>
+        <SubscribeButton channel={details.channel} />
       </View>
+
+      <View style={styles.chips}>
+        <FavoriteButton video={details} />
+      </View>
+      <LibraryError />
 
       {details.likeCount !== undefined ? (
         <View style={styles.chips}>
@@ -157,6 +174,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: Spacing.three,
+  },
+  channelLink: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.three,
+    minHeight: 48,
   },
   avatar: {
     width: 40,
