@@ -16,7 +16,13 @@ export default function RootLayout() {
       <NowPlayingProvider>
         <AnimatedSplashOverlay />
         <Stack>
-          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen
+            name="(tabs)"
+            options={{
+              headerShown: false,
+              statusBarStyle: colorScheme === 'dark' ? 'light' : 'dark',
+            }}
+          />
           <Stack.Screen
             name="watch/[id]"
             options={{

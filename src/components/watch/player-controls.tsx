@@ -9,7 +9,9 @@ import {
   View,
   type GestureResponderEvent,
   type LayoutChangeEvent,
+  type ViewStyle,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
 import { Spacing } from '@/constants/theme';
@@ -57,6 +59,7 @@ export function PlayerControls({
   segments = [],
   isLoading = false,
 }: Props) {
+  const insets = useSafeAreaInsets();
   const sponsorSettings = useSponsorSettings();
   const markers = segments.filter((seg) => sponsorSettings[seg.category] !== 'off');
   const { isPlaying } = useEvent(player, 'playingChange', { isPlaying: player.playing });
@@ -148,7 +151,16 @@ export function PlayerControls({
             )}
           </View>
 
-          <View pointerEvents="box-none" style={styles.bottomRow}>
+          <View
+            pointerEvents="box-none"
+            style={[
+              styles.bottomRow,
+              isFullscreen && {
+                paddingLeft: insets.left + 24,
+                paddingRight: insets.right + 24,
+                paddingBottom: insets.bottom + 44,
+              },
+            ]}>
             {isLive ? (
               <View style={styles.liveBadge}>
                 <View style={styles.liveDot} />
@@ -205,6 +217,16 @@ export function PlayerControls({
       {/* Im Vollbild nur zusammen mit der Steuerung zeigen, im Hochformat immer (wie YouTube) */}
       {!isLive && duration > 0 && (visible || !isFullscreen) ? (
         <SeekBar
+          insetStyle={
+            isFullscreen
+              ? {
+                  left: insets.left + 24,
+                  right: insets.right + 24,
+                  bottom: insets.bottom + 16,
+                  height: 32,
+                }
+              : undefined
+          }
           markers={markers.map((seg) => ({
             key: seg.uuid,
             from: seg.start / duration,
@@ -246,6 +268,7 @@ function SeekHint({ side, total }: { side: 'left' | 'right'; total: number }) {
 }
 
 interface SeekBarProps {
+  insetStyle?: ViewStyle;
   markers: { key: string; from: number; to: number; color: string }[];
   fraction: number;
   buffered: number;
@@ -254,7 +277,15 @@ interface SeekBarProps {
   onRelease: (fraction: number) => void;
 }
 
-function SeekBar({ markers, fraction, buffered, showThumb, onDrag, onRelease }: SeekBarProps) {
+function SeekBar({
+  insetStyle,
+  markers,
+  fraction,
+  buffered,
+  showThumb,
+  onDrag,
+  onRelease,
+}: SeekBarProps) {
   const width = useRef(0);
   const startX = useRef(0);
   const callbacks = useRef({ onDrag, onRelease });
@@ -287,7 +318,7 @@ function SeekBar({ markers, fraction, buffered, showThumb, onDrag, onRelease }: 
 
   return (
     <View
-      style={styles.seekTouch}
+      style={[styles.seekTouch, insetStyle]}
       onLayout={(e) => (width.current = e.nativeEvent.layout.width)}
       accessibilityRole="adjustable"
       accessibilityLabel="Fortschritt"

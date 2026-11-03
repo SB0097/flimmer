@@ -1,15 +1,16 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { router } from 'expo-router';
+import { router, useScrollToTop } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated from 'react-native-reanimated';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LibraryError } from '@/components/library-actions';
-import { MiniPlayer } from '@/components/mini-player';
+import { ScrollStatusBar, useScrollingChrome } from '@/components/scroll-chrome';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { VideoCard } from '@/components/video-card';
-import { BottomTabInset, Spacing } from '@/constants/theme';
+import { Spacing } from '@/constants/theme';
 import { useForYou } from '@/hooks/use-for-you';
 import { useTheme } from '@/hooks/use-theme';
 import { parseVideoId } from '@/lib/youtube-url';
@@ -17,6 +18,10 @@ import { videoSource, type SearchPage, type VideoSummary } from '@/services/vide
 
 export default function HomeScreen() {
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
+  const chrome = useScrollingChrome('home', insets.top + 104);
+  const list = useRef<FlatList<VideoSummary>>(null);
+  useScrollToTop(list);
   const feed = useForYou();
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
@@ -29,6 +34,8 @@ export default function HomeScreen() {
   const request = useRef(0);
 
   const goHome = () => {
+    chrome.show();
+    list.current?.scrollToOffset({ offset: 0, animated: false });
     request.current++;
     nextPage.current = undefined;
     busy.current = false;
@@ -47,6 +54,7 @@ export default function HomeScreen() {
       return;
     }
     const token = ++request.current;
+    list.current?.scrollToOffset({ offset: 0, animated: false });
     nextPage.current = undefined;
     busy.current = false;
     setSearching(true);
@@ -91,52 +99,61 @@ export default function HomeScreen() {
   const failure = searching ? error : feed.error;
   return (
     <ThemedView style={styles.container}>
-      <SafeAreaView edges={['top']} style={styles.header}>
-        <ThemedText type="subtitle">Flimmer</ThemedText>
-        <View style={[styles.searchRow, { backgroundColor: theme.backgroundElement }]}>
-          {searching ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Zur Startseite"
-              onPress={goHome}
-              style={styles.icon}>
-              <MaterialIcons name="arrow-back" size={22} color={theme.text} />
-            </Pressable>
-          ) : (
-            <MaterialIcons
-              name="search"
-              size={22}
-              color={theme.textSecondary}
-              style={styles.searchIcon}
+      <Animated.View
+        onLayout={chrome.onHeaderLayout}
+        style={[styles.headerOverlay, { backgroundColor: theme.background }, chrome.headerStyle]}>
+        <SafeAreaView edges={['top']} style={styles.header}>
+          <ThemedText type="subtitle">Flimmer</ThemedText>
+          <View style={[styles.searchRow, { backgroundColor: theme.backgroundElement }]}>
+            {searching ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Zur Startseite"
+                onPress={goHome}
+                style={styles.icon}>
+                <MaterialIcons name="arrow-back" size={22} color={theme.text} />
+              </Pressable>
+            ) : (
+              <MaterialIcons
+                name="search"
+                size={22}
+                color={theme.textSecondary}
+                style={styles.searchIcon}
+              />
+            )}
+            <TextInput
+              value={query}
+              onChangeText={(text) => {
+                if (!text) goHome();
+                else setQuery(text);
+              }}
+              onSubmitEditing={submit}
+              onFocus={() => chrome.setEditing(true)}
+              onBlur={() => chrome.setEditing(false)}
+              placeholder="Suchen oder YouTube-Link einfügen"
+              placeholderTextColor={theme.textSecondary}
+              returnKeyType="search"
+              autoCorrect={false}
+              autoCapitalize="none"
+              accessibilityLabel="Suchen"
+              style={[styles.input, { color: theme.text }]}
             />
-          )}
-          <TextInput
-            value={query}
-            onChangeText={(text) => {
-              if (!text) goHome();
-              else setQuery(text);
-            }}
-            onSubmitEditing={submit}
-            placeholder="Suchen oder YouTube-Link einfügen"
-            placeholderTextColor={theme.textSecondary}
-            returnKeyType="search"
-            autoCorrect={false}
-            autoCapitalize="none"
-            accessibilityLabel="Suchen"
-            style={[styles.input, { color: theme.text }]}
-          />
-          {query ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Suche leeren"
-              onPress={goHome}
-              style={styles.icon}>
-              <MaterialIcons name="close" size={20} color={theme.textSecondary} />
-            </Pressable>
-          ) : null}
-        </View>
-      </SafeAreaView>
-      <FlatList
+            {query ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Suche leeren"
+                onPress={goHome}
+                style={styles.icon}>
+                <MaterialIcons name="close" size={20} color={theme.textSecondary} />
+              </Pressable>
+            ) : null}
+          </View>
+        </SafeAreaView>
+      </Animated.View>
+      <Animated.FlatList
+        ref={list}
+        onScroll={chrome.onScroll}
+        scrollEventThrottle={16}
         data={shown}
         keyExtractor={(v) => v.id}
         renderItem={({ item }) => <VideoCard video={item} />}
@@ -152,7 +169,11 @@ export default function HomeScreen() {
                 void feed.refresh();
               }
         }
-        contentContainerStyle={styles.content}
+        contentContainerStyle={{
+          paddingTop: chrome.headerHeight,
+          paddingBottom: chrome.barHeight + 160,
+        }}
+        progressViewOffset={chrome.headerHeight}
         keyboardDismissMode="on-drag"
         ListHeaderComponent={
           <View style={styles.heading}>
@@ -209,7 +230,7 @@ export default function HomeScreen() {
           loadingMore && searching ? <ActivityIndicator style={styles.hint} /> : undefined
         }
       />
-      <MiniPlayer />
+      <ScrollStatusBar />
     </ThemedView>
   );
 }
@@ -233,7 +254,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   heading: { paddingHorizontal: Spacing.three, paddingBottom: Spacing.three, gap: Spacing.two },
-  content: { paddingBottom: BottomTabInset + 160 },
+  headerOverlay: { position: 'absolute', top: 0, left: 0, right: 0, zIndex: 1 },
   retry: { minHeight: 44, justifyContent: 'center' },
   hint: { padding: Spacing.four, textAlign: 'center' },
 });
