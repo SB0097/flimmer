@@ -47,7 +47,7 @@ let now = 0;
 beforeEach(() => {
   now = 0;
   jest.spyOn(Date, 'now').mockImplementation(() => now);
-  saved.get.mockReturnValue({ history: [], favorites: [], subscriptions: [] });
+  saved.get.mockReturnValue({ history: [], favorites: [], subscriptions: [], playlists: [] });
   saved.historyVersion.mockReturnValue('0');
   saved.record.mockReset().mockReturnValue(true);
 });

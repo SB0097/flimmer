@@ -1,4 +1,5 @@
 import type { ChannelRef, VideoSummary } from '@/services/video-source/types';
+import { playlistName } from '@/lib/playlists';
 
 import type { FeedCache, LibrarySnapshot, ProgressUpdate } from './types';
 
@@ -23,6 +24,14 @@ export class LibraryRepository {
       CREATE TABLE IF NOT EXISTS library_favorites (video_id TEXT PRIMARY KEY NOT NULL, saved_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS library_subscriptions (channel_id TEXT PRIMARY KEY NOT NULL, json TEXT NOT NULL, subscribed_at INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS library_feed_cache (key TEXT PRIMARY KEY NOT NULL, fetched_at INTEGER NOT NULL, json TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS library_playlists (
+        id TEXT PRIMARY KEY NOT NULL, name TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS library_playlist_videos (
+        playlist_id TEXT NOT NULL, video_id TEXT NOT NULL, position INTEGER NOT NULL,
+        PRIMARY KEY (playlist_id, video_id)
+      );
+      CREATE INDEX IF NOT EXISTS library_playlist_order ON library_playlist_videos (playlist_id, position);
     `);
   }
 
@@ -42,6 +51,22 @@ export class LibraryRepository {
     const subscriptions = this.db.getAllSync<{ json: string; subscribed_at: number }>(
       'SELECT json, subscribed_at FROM library_subscriptions ORDER BY subscribed_at DESC',
     );
+    const playlists = this.db.getAllSync<{
+      id: string;
+      name: string;
+      created_at: number;
+      updated_at: number;
+    }>('SELECT * FROM library_playlists ORDER BY updated_at DESC, id');
+    const entries = this.db.getAllSync<{ playlist_id: string; json: string }>(
+      `SELECT p.playlist_id, v.json FROM library_playlist_videos p
+       JOIN library_videos v ON v.id = p.video_id ORDER BY p.playlist_id, p.position`,
+    );
+    const playlistVideos = new Map<string, VideoSummary[]>();
+    for (const entry of entries) {
+      const videos = playlistVideos.get(entry.playlist_id) ?? [];
+      videos.push(JSON.parse(entry.json) as VideoSummary);
+      playlistVideos.set(entry.playlist_id, videos);
+    }
     return {
       history: history.map((h) => ({
         video: JSON.parse(h.json) as VideoSummary,
@@ -57,6 +82,13 @@ export class LibraryRepository {
       subscriptions: subscriptions.map((s) => ({
         channel: JSON.parse(s.json) as ChannelRef,
         subscribedAt: s.subscribed_at,
+      })),
+      playlists: playlists.map((p) => ({
+        id: p.id,
+        name: p.name,
+        createdAt: p.created_at,
+        updatedAt: p.updated_at,
+        videos: playlistVideos.get(p.id) ?? [],
       })),
     };
   }
@@ -177,8 +209,110 @@ export class LibraryRepository {
 
   private pruneVideos(): void {
     this.db.execSync(
-      'DELETE FROM library_videos WHERE id NOT IN (SELECT video_id FROM library_history UNION SELECT video_id FROM library_favorites)',
+      `DELETE FROM library_videos WHERE id NOT IN (
+        SELECT video_id FROM library_history UNION SELECT video_id FROM library_favorites
+        UNION SELECT video_id FROM library_playlist_videos)`,
     );
+  }
+
+  createPlaylist(id: string, name: string, now: number, video?: VideoSummary): void {
+    const normalized = playlistName(name);
+    this.db.withTransactionSync(() => {
+      this.db.runSync(
+        'INSERT INTO library_playlists (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)',
+        id,
+        normalized,
+        now,
+        now,
+      );
+      if (video) this.addPlaylistVideo(id, video, now, false);
+    });
+  }
+
+  renamePlaylist(id: string, name: string, now: number): void {
+    this.requirePlaylist(id);
+    this.db.runSync(
+      'UPDATE library_playlists SET name = ?, updated_at = ? WHERE id = ?',
+      playlistName(name),
+      now,
+      id,
+    );
+  }
+
+  deletePlaylist(id: string): void {
+    this.db.withTransactionSync(() => {
+      this.db.runSync('DELETE FROM library_playlist_videos WHERE playlist_id = ?', id);
+      this.db.runSync('DELETE FROM library_playlists WHERE id = ?', id);
+      this.pruneVideos();
+    });
+  }
+
+  private requirePlaylist(id: string): void {
+    if (!this.db.getFirstSync('SELECT id FROM library_playlists WHERE id = ?', id))
+      throw new Error('Diese Playlist ist nicht mehr vorhanden.');
+  }
+
+  addPlaylistVideo(id: string, video: VideoSummary, now: number, transactional = true): void {
+    const add = () => {
+      this.requirePlaylist(id);
+      this.putVideo(video);
+      const exists = this.db.getFirstSync(
+        'SELECT video_id FROM library_playlist_videos WHERE playlist_id = ? AND video_id = ?',
+        id,
+        video.id,
+      );
+      if (exists) return;
+      this.db.runSync(
+        `INSERT INTO library_playlist_videos (playlist_id, video_id, position)
+         SELECT ?, ?, COALESCE(MAX(position), -1) + 1 FROM library_playlist_videos WHERE playlist_id = ?`,
+        id,
+        video.id,
+        id,
+      );
+      this.db.runSync('UPDATE library_playlists SET updated_at = ? WHERE id = ?', now, id);
+    };
+    if (transactional) this.db.withTransactionSync(add);
+    else add(); // Anlage und erstes Video gehören bereits zu derselben Transaktion.
+  }
+
+  removePlaylistVideo(id: string, videoId: string, now: number): void {
+    this.db.withTransactionSync(() => {
+      this.requirePlaylist(id);
+      this.db.runSync(
+        'DELETE FROM library_playlist_videos WHERE playlist_id = ? AND video_id = ?',
+        id,
+        videoId,
+      );
+      this.db.runSync('UPDATE library_playlists SET updated_at = ? WHERE id = ?', now, id);
+      this.pruneVideos();
+    });
+  }
+
+  movePlaylistVideo(id: string, videoId: string, direction: -1 | 1, now: number): void {
+    this.db.withTransactionSync(() => {
+      this.requirePlaylist(id);
+      const rows = this.db.getAllSync<{ video_id: string; position: number }>(
+        'SELECT video_id, position FROM library_playlist_videos WHERE playlist_id = ? ORDER BY position',
+        id,
+      );
+      const index = rows.findIndex((row) => row.video_id === videoId);
+      const current = rows[index];
+      const neighbor = index >= 0 ? rows[index + direction] : undefined;
+      if (!current || !neighbor) return;
+      this.db.runSync(
+        'UPDATE library_playlist_videos SET position = ? WHERE playlist_id = ? AND video_id = ?',
+        neighbor.position,
+        id,
+        current.video_id,
+      );
+      this.db.runSync(
+        'UPDATE library_playlist_videos SET position = ? WHERE playlist_id = ? AND video_id = ?',
+        current.position,
+        id,
+        neighbor.video_id,
+      );
+      this.db.runSync('UPDATE library_playlists SET updated_at = ? WHERE id = ?', now, id);
+    });
   }
 
   getCache(key: string): FeedCache | undefined {

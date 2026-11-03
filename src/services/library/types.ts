@@ -18,10 +18,19 @@ export interface Subscription {
   subscribedAt: number;
 }
 
+export interface Playlist {
+  id: string;
+  name: string;
+  createdAt: number;
+  updatedAt: number;
+  videos: VideoSummary[];
+}
+
 export interface LibrarySnapshot {
   history: HistoryEntry[];
   favorites: Favorite[];
   subscriptions: Subscription[];
+  playlists: Playlist[];
   error?: string;
 }
 

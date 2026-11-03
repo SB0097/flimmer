@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
+import { SaveToPlaylistButton } from '@/components/playlist-picker';
 import { FavoriteButton, LibraryError, SubscribeButton } from '@/components/library-actions';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -79,6 +80,7 @@ export function VideoInfo({ details, comments, onOpenComments, diagnostics }: Pr
 
       <View style={styles.chips}>
         <FavoriteButton video={details} />
+        <SaveToPlaylistButton video={details} />
       </View>
       <LibraryError />
 
@@ -192,6 +194,7 @@ const styles = StyleSheet.create({
   },
   chips: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: Spacing.two,
   },
   chip: {

@@ -124,6 +124,17 @@ export default function LibraryScreen() {
         }
         ListHeaderComponent={
           <>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Playlists öffnen: ${saved.playlists.length}`}
+              onPress={() => router.push('/playlists')}
+              style={styles.playlists}>
+              <MaterialIcons name="playlist-play" size={28} color={theme.text} />
+              <ThemedText type="smallBold" style={styles.flex}>
+                Meine Playlists · {saved.playlists.length}
+              </ThemedText>
+              <MaterialIcons name="chevron-right" size={24} color={theme.textSecondary} />
+            </Pressable>
             <LibraryError />
             {tab === 'Verlauf' && saved.history.length ? (
               <Pressable accessibilityRole="button" onPress={clearHistory} style={styles.clear}>
@@ -232,6 +243,13 @@ export default function LibraryScreen() {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
+  playlists: {
+    minHeight: 64,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   header: {
     paddingHorizontal: Spacing.three,
     paddingTop: Spacing.two,

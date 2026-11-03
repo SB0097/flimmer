@@ -98,3 +98,109 @@ it('behält angereicherte Metadaten und entfernt Einträge unabhängig voneinand
     sqlite.close();
   }
 });
+
+it('erweitert eine bestehende Bibliothek ohne Datenverlust und speichert Playlists über Neustarts', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'flimmer-playlists-'));
+  const path = join(directory, 'library.db');
+  let sqlite = new DatabaseSync(path);
+  try {
+    let repo = new LibraryRepository(adapter(sqlite));
+    repo.record(video('verlauf'), { position: 42, watchedSeconds: 10 }, 1);
+    repo.toggleFavorite(video('favorit'), 2);
+    repo.toggleSubscription(video('verlauf').channel, 3);
+    // Der Zustand entspricht einer Bibliothek vor Einführung der neuen Tabellen.
+    sqlite.exec('DROP TABLE library_playlist_videos; DROP TABLE library_playlists;');
+    repo = new LibraryRepository(adapter(sqlite));
+    repo.createPlaylist('p', "  Meine 'Videos' 🎵  ", 4, video('a'));
+    repo.addPlaylistVideo('p', video('b'), 5);
+    repo.addPlaylistVideo('p', video('a'), 6);
+    repo.renamePlaylist('p', 'Für später', 7);
+    repo.movePlaylistVideo('p', 'b', -1, 8);
+    sqlite.close();
+    sqlite = new DatabaseSync(path);
+    repo = new LibraryRepository(adapter(sqlite));
+    const saved = repo.read();
+    expect(saved.playlists[0]).toMatchObject({ name: 'Für später', createdAt: 4, updatedAt: 8 });
+    expect(saved.playlists[0].videos.map((v) => v.id)).toEqual(['b', 'a']);
+    expect(saved.history[0].position).toBe(42);
+    expect(saved.favorites[0].video.id).toBe('favorit');
+    expect(saved.subscriptions).toHaveLength(1);
+  } finally {
+    sqlite.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+it('behält gemeinsame Videos beim Löschen von Verlauf, Favoriten oder einzelnen Playlists', () => {
+  const sqlite = new DatabaseSync(':memory:');
+  try {
+    const repo = new LibraryRepository(adapter(sqlite));
+    repo.record(video('a'), { position: 20, watchedSeconds: 10 }, 1);
+    repo.toggleFavorite(video('a'), 2);
+    repo.createPlaylist('p1', 'Erste', 3, video('a'));
+    repo.createPlaylist('p2', 'Zweite', 4, video('a'));
+    repo.removeHistory();
+    repo.toggleFavorite(video('a'), 5);
+    repo.deletePlaylist('p1');
+    expect(repo.read().playlists[0].videos[0].id).toBe('a');
+    repo.removePlaylistVideo('p2', 'a', 6);
+    expect(repo.read().playlists[0].videos).toEqual([]);
+    expect(sqlite.prepare('SELECT * FROM library_videos').all()).toEqual([]);
+    repo.toggleFavorite(video('b'), 7);
+    repo.addPlaylistVideo('p2', video('b'), 8);
+    repo.deletePlaylist('p2');
+    expect(repo.read().playlists).toEqual([]);
+    expect(repo.read().favorites[0].video.id).toBe('b');
+  } finally {
+    sqlite.close();
+  }
+});
+
+it('sortiert nach Entfernen und Hinzufügen korrekt und lässt Randbewegungen unverändert', () => {
+  const sqlite = new DatabaseSync(':memory:');
+  try {
+    const repo = new LibraryRepository(adapter(sqlite));
+    repo.createPlaylist('p', 'Reihenfolge', 1);
+    for (const id of ['a', 'b', 'c']) repo.addPlaylistVideo('p', video(id), 2);
+    repo.removePlaylistVideo('p', 'b', 3);
+    repo.addPlaylistVideo('p', video('d'), 4);
+    repo.movePlaylistVideo('p', 'a', -1, 5);
+    repo.movePlaylistVideo('p', 'd', 1, 6);
+    repo.movePlaylistVideo('p', 'fehlt', 1, 7);
+    expect(repo.read().playlists[0].videos.map((v) => v.id)).toEqual(['a', 'c', 'd']);
+    repo.movePlaylistVideo('p', 'a', 1, 8);
+    expect(repo.read().playlists[0].videos.map((v) => v.id)).toEqual(['c', 'a', 'd']);
+  } finally {
+    sqlite.close();
+  }
+});
+
+it('weist ungültige Namen und fehlende Listen ab, ohne verwaiste Videos anzulegen', () => {
+  const sqlite = new DatabaseSync(':memory:');
+  try {
+    const repo = new LibraryRepository(adapter(sqlite));
+    expect(() => repo.createPlaylist('p', ' ', 1, video('a'))).toThrow();
+    expect(() => repo.addPlaylistVideo('fehlt', video('b'), 2)).toThrow();
+    expect(repo.read().playlists).toEqual([]);
+    expect(sqlite.prepare('SELECT * FROM library_videos').all()).toEqual([]);
+    repo.createPlaylist('p', 'Gültig', 3);
+    expect(() => repo.renamePlaylist('p', 'x'.repeat(101), 4)).toThrow();
+    expect(repo.read().playlists[0].name).toBe('Gültig');
+  } finally {
+    sqlite.close();
+  }
+});
+
+it('rollt Playlist und Metadaten zurück, wenn das erste Video nicht gespeichert werden kann', () => {
+  const sqlite = new DatabaseSync(':memory:');
+  try {
+    const repo = new LibraryRepository(adapter(sqlite));
+    sqlite.exec(`CREATE TRIGGER reject_first_video BEFORE INSERT ON library_playlist_videos
+      BEGIN SELECT RAISE(ABORT, 'Speichern fehlgeschlagen'); END;`);
+    expect(() => repo.createPlaylist('p', 'Atomar', 1, video('a'))).toThrow();
+    expect(repo.read().playlists).toEqual([]);
+    expect(sqlite.prepare('SELECT * FROM library_videos').all()).toEqual([]);
+  } finally {
+    sqlite.close();
+  }
+});
