@@ -24,11 +24,13 @@ import {
   BackHandler,
   FlatList,
   Pressable,
+  Platform,
+  StatusBar as NativeStatusBar,
   StyleSheet,
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PlayerVideo } from '@/components/player-video';
 import { ThemedText } from '@/components/themed-text';
@@ -227,6 +229,13 @@ export default function WatchScreen() {
 
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  // Nach dem Einblenden der Systemleisten können die Insets noch vom Vollbild
+  // stammen (top=0). Auf Android die native Statusleistenhöhe als Untergrenze
+  // verwenden, bis die neuen Insets eintreffen.
+  const portraitTop = Math.max(
+    insets.top,
+    Platform.OS === 'android' ? (NativeStatusBar.currentHeight ?? 0) : 0,
+  );
   const swipe = useMinimizeGesture({
     isFullscreen,
     getFrames: () => {
@@ -248,7 +257,7 @@ export default function WatchScreen() {
       // Bewusst berechnet statt gemessen: Messen würde laufende Animationen mitzählen.
       const video: Frame = {
         x: 0,
-        y: insets.top,
+        y: portraitTop,
         width: screenWidth,
         height: (screenWidth * 9) / 16,
       };
@@ -370,8 +379,17 @@ export default function WatchScreen() {
   );
 
   return (
-    <View ref={rootRef} onLayout={measureRoot} style={styles.container}>
-      <Stack.Screen options={{ statusBarHidden: isFullscreen, statusBarStyle: 'light' }} />
+    <View
+      ref={rootRef}
+      onLayout={measureRoot}
+      style={[styles.container, !isFullscreen && { paddingBottom: insets.bottom }]}>
+      <Stack.Screen
+        options={{
+          statusBarHidden: isFullscreen,
+          statusBarStyle: 'light',
+          navigationBarHidden: isFullscreen,
+        }}
+      />
       <Animated.View
         style={[
           styles.container,
@@ -382,7 +400,7 @@ export default function WatchScreen() {
         {!isFullscreen ? (
           <View pointerEvents="none" style={StyleSheet.absoluteFill}>
             <Animated.View
-              style={[styles.statusBand, { height: insets.top, opacity: swipe.backgroundOpacity }]}
+              style={[styles.statusBand, { height: portraitTop, opacity: swipe.backgroundOpacity }]}
             />
             <Animated.View
               style={[
@@ -401,7 +419,7 @@ export default function WatchScreen() {
         ) : null}
         <StatusBar style="light" hidden={isFullscreen} />
         <View {...swipe.panHandlers} style={isFullscreen && styles.flex}>
-          <SafeAreaView edges={isFullscreen ? [] : ['top']} style={isFullscreen && styles.flex}>
+          <View style={isFullscreen ? styles.flex : { paddingTop: portraitTop }}>
             <Animated.View style={isFullscreen ? styles.flex : swipe.videoStyle}>
               <View style={isFullscreen ? styles.videoFullscreen : styles.videoBox}>
                 {stream.kind === 'ready' && focused ? (
@@ -472,7 +490,7 @@ export default function WatchScreen() {
                 ) : null}
               </View>
             </Animated.View>
-          </SafeAreaView>
+          </View>
         </View>
 
         {!isFullscreen ? (
