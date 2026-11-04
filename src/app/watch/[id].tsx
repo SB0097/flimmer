@@ -420,7 +420,8 @@ export default function WatchScreen() {
         <StatusBar style="light" hidden={isFullscreen} />
         <View {...swipe.panHandlers} style={isFullscreen && styles.flex}>
           <View style={isFullscreen ? styles.flex : { paddingTop: portraitTop }}>
-            <Animated.View style={isFullscreen ? styles.flex : swipe.videoStyle}>
+            <Animated.View
+              style={isFullscreen ? [styles.flex, swipe.fullscreenStyle] : swipe.videoStyle}>
               <View style={isFullscreen ? styles.videoFullscreen : styles.videoBox}>
                 {stream.kind === 'ready' && focused ? (
                   <>
