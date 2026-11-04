@@ -406,9 +406,18 @@ export default function WatchScreen() {
               <View style={isFullscreen ? styles.videoFullscreen : styles.videoBox}>
                 {stream.kind === 'ready' && focused ? (
                   <>
-                    <PlayerVideo style={StyleSheet.absoluteFill} />
+                    {/* SurfaceView nach einer echten Fenstergrößenänderung frisch anhängen.
+                        Der globale Player bleibt bestehen, verliert also weder Position noch Ton. */}
+                    <PlayerVideo
+                      key={`video:${screenWidth}x${screenHeight}`}
+                      style={StyleSheet.absoluteFill}
+                    />
                     {!failure ? (
                       <PlayerControls
+                        // Nach Rotation mit der final gemessenen Geometrie neu aufbauen.
+                        // So behält der PanResponder der Zeitleiste weder alte Breiten
+                        // noch einen während des Layoutwechsels begonnenen Touch-Zustand.
+                        key={`${id}:${isFullscreen ? 'fullscreen' : 'inline'}:${screenWidth}x${screenHeight}`}
                         player={player}
                         isLive={Boolean(details?.isLive)}
                         isFullscreen={isFullscreen}
