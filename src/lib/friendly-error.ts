@@ -9,6 +9,12 @@ interface AttemptLike {
   message: string;
 }
 
+/** YouTubes Bot-Schutz („Melde dich an … kein Bot“ / „Sign in … not a bot“) */
+export function isBotCheck(message: string): boolean {
+  const text = message.toLowerCase();
+  return text.includes('kein bot') || text.includes('not a bot');
+}
+
 /**
  * Übersetzt technische Fehler (YouTube-Status, Netzwerk, Player) in eine
  * verständliche Meldung. Die technischen Details bleiben in der Diagnose.
@@ -52,10 +58,10 @@ export function friendlyStreamError(error: unknown, attempts: AttemptLike[] = []
   if (has('land nicht', 'country', 'not available in your')) {
     return { title: 'In deinem Land nicht verfügbar', retryable: false };
   }
-  if (has('kein bot', 'not a bot')) {
+  if (isBotCheck(text)) {
     return {
       title: 'YouTube blockiert gerade',
-      hint: 'YouTube hält dieses Netzwerk für einen Bot. Später erneut versuchen.',
+      hint: 'YouTube hält diese Verbindung für einen Bot. VPN aus oder WLAN/Mobilfunk wechseln, dann erneut versuchen.',
       retryable: true,
     };
   }
