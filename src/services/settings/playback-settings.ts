@@ -5,19 +5,23 @@ export interface PlaybackSettings {
   background: boolean;
   /** Beim Verlassen der App (Home) läuft das Video in einem kleinen Fenster weiter */
   pip: boolean;
+  /** Leise Videos auf die von YouTube übliche Lautheit anheben */
+  loudness: boolean;
 }
 
 export const DEFAULT_PLAYBACK_SETTINGS: PlaybackSettings = {
   background: true,
   pip: true,
+  loudness: true,
 };
 
 function sanitize(raw: unknown): PlaybackSettings {
   const result = { ...DEFAULT_PLAYBACK_SETTINGS };
   if (raw && typeof raw === 'object') {
-    const { background, pip } = raw as Record<string, unknown>;
+    const { background, pip, loudness } = raw as Record<string, unknown>;
     if (typeof background === 'boolean') result.background = background;
     if (typeof pip === 'boolean') result.pip = pip;
+    if (typeof loudness === 'boolean') result.loudness = loudness;
   }
   return result;
 }

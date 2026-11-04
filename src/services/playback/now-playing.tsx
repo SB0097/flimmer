@@ -11,6 +11,7 @@ import {
 } from 'react';
 
 import type { Segment } from '@/lib/segments';
+import { loudnessGainDb } from '@/lib/loudness';
 import { playlistNeighbor, type PlaybackQueue } from '@/lib/playlists';
 import { sleepRemainingMs, sleepStep, type SleepTimer } from '@/lib/sleep-timer';
 import { library } from '@/services/library/store';
@@ -21,6 +22,7 @@ import { loadCaption } from '@/services/playback/captions';
 import {
   playSource,
   resumablePosition,
+  setLoudnessGain,
   setPlayerVolume,
   setPlayerSubtitle,
   stopPlayback,
@@ -362,6 +364,11 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
           .catch(() => {})
           .then(async () => {
             if (cancelled) return;
+            // Schon vor dem ersten Ton, sonst klingt der Anfang mit der Anhebung des Vorgängers
+            setLoudnessGain(
+              player,
+              loudnessGainDb(result.details?.loudnessDb, playbackSettings.get().loudness),
+            );
             await playSource(player, result.source, result.details, savedPosition, {
               isCurrent: () => !cancelled && currentId.current === id,
               resume: true,
@@ -399,6 +406,13 @@ export function NowPlayingProvider({ children }: { children: ReactNode }) {
 
   const details = stream.kind === 'ready' ? stream.result.details : undefined;
   usePlaybackHistory(player, details);
+
+  // Leise Videos anheben (vor dem Start in loadStream gesetzt, hier für den Schalter)
+  const loudnessDb = details?.loudnessDb;
+  useEffect(() => {
+    if (stream.kind !== 'ready') return;
+    setLoudnessGain(player, loudnessGainDb(loudnessDb, playback.loudness));
+  }, [player, stream.kind, loudnessDb, playback.loudness]);
 
   const chooseQuality = useCallback(
     async (height: number | undefined) => {
