@@ -1,12 +1,13 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { useEvent } from 'expo';
-import { router, useIsFocused } from 'expo-router';
+import { useRouter, useIsFocused } from 'expo-router';
 import { useEffect, useRef, type ComponentRef } from 'react';
 import { Pressable, StyleSheet, useWindowDimensions, View } from 'react-native';
 
 import { PlayerVideo } from '@/components/player-video';
 import { VideoThumbnail } from '@/components/video-thumbnail';
-import { Spacing } from '@/constants/theme';
+import { Brand, Spacing } from '@/constants/theme';
+import { playlistNeighbor } from '@/lib/playlists';
 import { setMiniPlayerFrame } from '@/services/playback/mini-frame';
 import { useNowPlaying } from '@/services/playback/now-playing';
 
@@ -22,11 +23,12 @@ const MARGIN = Spacing.two;
  * Gehört als letztes Kind in einen Bildschirm-Container – es liegt absolut
  * über dem Inhalt, direkt über der Tab-Leiste.
  */
-export function MiniPlayer() {
+export function MiniPlayer({ bottomInset = 0 }: { bottomInset?: number }) {
+  const router = useRouter();
   const focused = useIsFocused();
   const { width: screenWidth } = useWindowDimensions();
   const cardRef = useRef<ComponentRef<typeof View>>(null);
-  const { player, videoId, stream, details, close } = useNowPlaying();
+  const { player, videoId, stream, details, close, playlist, stepPlaylist } = useNowPlaying();
 
   // Position nur merken, solange das Fenster sichtbar ist: Liegt die Video-Seite
   // darüber, ordnet sich die Seite darunter anders an – das wäre das falsche Ziel.
@@ -37,7 +39,7 @@ export function MiniPlayer() {
     );
   };
   useEffect(() => {
-    if (!focused || !videoId) return;
+    if (!focused) return;
     cardRef.current?.measureInWindow((x, y, w, h) =>
       setMiniPlayerFrame({ x, y, width: w, height: h }),
     );
@@ -50,10 +52,19 @@ export function MiniPlayer() {
     currentOffsetFromLive: null,
   });
 
-  if (!videoId) return null;
-
   const width = Math.round(screenWidth * WIDTH_FRACTION);
   const height = Math.round((width * 9) / 16);
+  // Auch vor dem ersten Start aus einer Playlist das richtige Animationsziel messen.
+  if (!videoId)
+    return (
+      <View
+        ref={cardRef}
+        collapsable={false}
+        pointerEvents="none"
+        onLayout={measure}
+        style={[styles.card, { width, height, bottom: MARGIN + bottomInset, opacity: 0 }]}
+      />
+    );
   const duration = player.duration;
   const progress = !details?.isLive && duration > 0 ? Math.min(1, currentTime / duration) : 0;
   const title =
@@ -64,7 +75,11 @@ export function MiniPlayer() {
       ref={cardRef}
       // Unsichtbar, solange die Video-Seite darüber liegt: Beim Runterziehen gibt es
       // sonst ein zweites Bild. Gemessen wird trotzdem (Ziel der Animation).
-      style={[styles.card, { width, height }, !focused && styles.hidden]}
+      style={[
+        styles.card,
+        { width, height, bottom: MARGIN + bottomInset },
+        !focused && styles.hidden,
+      ]}
       pointerEvents={focused ? 'auto' : 'none'}
       onLayout={measure}>
       {/* Das Videobild darf nur an einer Stelle hängen: auf der sichtbaren Seite */}
@@ -82,7 +97,10 @@ export function MiniPlayer() {
       <Pressable
         style={StyleSheet.absoluteFill}
         onPress={() =>
-          router.push({ pathname: '/watch/[id]', params: { id: videoId, from: 'mini' } })
+          router.push({
+            pathname: '/watch/[id]',
+            params: { id: videoId, from: 'mini', ...(playlist ? { playlist: playlist.id } : {}) },
+          })
         }
         accessibilityRole="button"
         accessibilityLabel={`Video öffnen: ${title}`}
@@ -105,6 +123,17 @@ export function MiniPlayer() {
         accessibilityLabel="Schließen">
         <MaterialIcons name="close" size={22} color="#fff" />
       </Pressable>
+
+      {playlist && playlistNeighbor(playlist.videoIds, videoId, 1) ? (
+        <Pressable
+          onPress={() => stepPlaylist(1)}
+          hitSlop={6}
+          style={[styles.round, styles.topCenter]}
+          accessibilityRole="button"
+          accessibilityLabel="Nächstes Video">
+          <MaterialIcons name="skip-next" size={24} color="#fff" />
+        </Pressable>
+      ) : null}
 
       <View style={styles.track}>
         <View style={[styles.progress, { width: `${progress * 100}%` }]} />
@@ -146,6 +175,7 @@ const styles = StyleSheet.create({
   topRight: {
     right: Spacing.one,
   },
+  topCenter: { left: '50%', marginLeft: -18 },
   track: {
     position: 'absolute',
     left: 0,
@@ -156,6 +186,6 @@ const styles = StyleSheet.create({
   },
   progress: {
     height: '100%',
-    backgroundColor: '#FF0033',
+    backgroundColor: Brand.playback,
   },
 });

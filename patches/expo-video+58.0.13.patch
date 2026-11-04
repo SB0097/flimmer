@@ -10,11 +10,20 @@ diff --git a/node_modules/expo-video/android/src/main/java/expo/modules/video/pl
        playerBuilderOptions?.seekBackwardIncrement?.let {
          setSeekBackIncrementMs((it).toLong(DurationUnit.MILLISECONDS).coerceIn(1, 999_000))
        }
+@@ -452,3 +454,8 @@
+     mediaSource?.let {
++      // Flimmer: lokale Downloads wechseln ohne Ladepause. stop() gibt den alten
++      // Decoder frei, sonst behält Goldfish bei kleinerer Auflösung den Bildpuffer.
++      if (newSource?.uri?.scheme == "file" && newSource.uri?.path?.contains("/downloads/") == true) {
++        player.stop()
++      }
+       player.setMediaSource(it)
+       player.prepare()
 diff --git a/node_modules/expo-video/android/src/main/java/expo/modules/video/playbackService/ExpoVideoPlaybackService.kt b/node_modules/expo-video/android/src/main/java/expo/modules/video/playbackService/ExpoVideoPlaybackService.kt
 --- a/node_modules/expo-video/android/src/main/java/expo/modules/video/playbackService/ExpoVideoPlaybackService.kt
 +++ b/node_modules/expo-video/android/src/main/java/expo/modules/video/playbackService/ExpoVideoPlaybackService.kt
 @@ -2,6 +2,7 @@
- 
+
  import android.app.NotificationChannel
  import android.app.NotificationManager
 +import android.app.PendingIntent
@@ -24,7 +33,7 @@ diff --git a/node_modules/expo-video/android/src/main/java/expo/modules/video/pl
 @@ -57,6 +58,18 @@
      .setIconResId(R.drawable.seek_backwards_10s)
      .build()
- 
+
 +  // Flimmer: Tippen auf die Benachrichtigung öffnet die App
 +  private fun openAppIntent(): PendingIntent? {
 +    val intent = packageManager.getLaunchIntentForPackage(packageName) ?: return null
@@ -46,7 +55,7 @@ diff --git a/node_modules/expo-video/android/src/main/java/expo/modules/video/pl
          .setCustomLayout(ImmutableList.of(seekBackwardButton, seekForwardButton))
 +        .apply { openAppIntent()?.let { setSessionActivity(it) } }
          .build()
- 
+
        // Replace the basic media session with a session connected to our playback service.
 @@ -188,6 +202,7 @@
        .setSmallIcon(androidx.media3.session.R.drawable.media3_icon_circular_play)
@@ -54,5 +63,85 @@ diff --git a/node_modules/expo-video/android/src/main/java/expo/modules/video/pl
        .setStyle(MediaStyleNotificationHelper.MediaStyle(session))
 +      .setContentIntent(openAppIntent())
        .build()
- 
+
      val notificationId = session.player.hashCode()
+diff --git a/node_modules/expo-video/android/src/main/java/expo/modules/video/records/VideoSource.kt b/node_modules/expo-video/android/src/main/java/expo/modules/video/records/VideoSource.kt
+index b0bfb49..3d9113f 100644
+--- a/node_modules/expo-video/android/src/main/java/expo/modules/video/records/VideoSource.kt
++++ b/node_modules/expo-video/android/src/main/java/expo/modules/video/records/VideoSource.kt
+@@ -6,6 +6,8 @@ import android.content.Context
+ import android.net.Uri
+ import android.util.Log
+ import androidx.annotation.OptIn
++import androidx.media3.common.C
++import androidx.media3.common.MimeTypes
+ import androidx.media3.common.MediaItem
+ import androidx.media3.common.MediaMetadata
+ import androidx.media3.common.util.UnstableApi
+@@ -28,7 +30,8 @@ class VideoSource(
+   @Field var metadata: VideoMetadata? = null,
+   @Field var headers: Map<String, String>? = null,
+   @Field var useCaching: Boolean = false,
+-  @Field val contentType: ContentType = ContentType.AUTO
++  @Field val contentType: ContentType = ContentType.AUTO,
++  @Field val externalSubtitles: List<ExternalSubtitle> = emptyList()
+ ) : Record, Serializable {
+   private fun toMediaId(): String {
+     return "uri:${this.uri}" +
+@@ -41,7 +44,8 @@ class VideoSource(
+       "NotificationDataTitle:${this.metadata?.title}" +
+       "NotificationDataSecondaryText:${this.metadata?.artist}" +
+       "NotificationDataArtwork:${this.metadata?.artwork?.path}" +
+-      "ContentType:${this.contentType.value}"
++      "ContentType:${this.contentType.value}" +
++      "ExternalSubtitles:${this.externalSubtitles.map { it.uri }}"
+   }
+
+   fun toMediaSource(context: Context): MediaSource? {
+@@ -53,6 +57,16 @@ class VideoSource(
+     .Builder()
+     .apply {
+       setUri(parseLocalAssetId(uri, context))
++      // Flimmer: WebVTT auch im Vollbild und in Bild-im-Bild nativ anzeigen.
++      setSubtitleConfigurations(externalSubtitles.map { subtitle ->
++        MediaItem.SubtitleConfiguration.Builder(subtitle.uri)
++          .setMimeType(MimeTypes.TEXT_VTT)
++          .setLanguage(subtitle.language)
++          .setLabel(subtitle.label)
++          .setId("flimmer-subtitles")
++          .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
++          .build()
++      })
+       contentType.toMimeTypeString()?.let {
+         setMimeType(it)
+       }
+@@ -104,3 +118,10 @@ class VideoSource(
+     }
+   }
+ }
++
++@OptimizedRecord
++class ExternalSubtitle(
++  @Field val uri: Uri,
++  @Field val language: String,
++  @Field val label: String
++) : Record, Serializable
+diff --git a/node_modules/expo-video/android/src/main/java/expo/modules/video/utils/DataSourceUtils.kt b/node_modules/expo-video/android/src/main/java/expo/modules/video/utils/DataSourceUtils.kt
+index 0f1207c..0f93e5d 100644
+--- a/node_modules/expo-video/android/src/main/java/expo/modules/video/utils/DataSourceUtils.kt
++++ b/node_modules/expo-video/android/src/main/java/expo/modules/video/utils/DataSourceUtils.kt
+@@ -31,7 +31,13 @@ fun buildBaseDataSourceFactory(
+   cacheStorageKey: String? = null
+ ): DataSource.Factory {
+   return if (videoSource.uri?.scheme?.startsWith("http") == true) {
+-    buildOkHttpDataSourceFactory(context, videoSource, cacheStorageKey)
++    val httpFactory = buildOkHttpDataSourceFactory(context, videoSource, cacheStorageKey)
++    // Flimmer: HTTP-Video plus lokale Untertitel benötigen beide Protokolle.
++    if (videoSource.externalSubtitles.isNotEmpty()) {
++      DefaultDataSource.Factory(context, httpFactory)
++    } else {
++      httpFactory
++    }
+   } else {
+     DefaultDataSource.Factory(context)
+   }

@@ -1,0 +1,403 @@
+import { act, renderHook, waitFor } from '@testing-library/react-native';
+
+import { library } from '@/services/library/store';
+import { downloads } from '@/services/downloads/store';
+import { fetchSegments } from '@/services/sponsorblock/sponsorblock';
+import { videoSource } from '@/services/video-source';
+import { playSource } from '../player-actions';
+import { NowPlayingProvider, useNowPlaying } from '../now-playing';
+import { loadCaption } from '../captions';
+import { loadQualities, sourceForQuality } from '../quality';
+import type { CaptionTrack } from '@/services/video-source/types';
+
+type Callback = (event: { isPlaying: boolean }) => void;
+const mockListeners = new Map<string, Set<Callback>>();
+const mockPlayer = {
+  currentTime: 0,
+  duration: 100,
+  playing: false,
+  subtitleTrack: null as unknown,
+  availableSubtitleTracks: [] as { id: string; language: string }[],
+  pause: jest.fn(),
+  addListener: jest.fn((event: string, listener: Callback) => {
+    const listeners = mockListeners.get(event) ?? new Set<Callback>();
+    listeners.add(listener);
+    mockListeners.set(event, listeners);
+    return { remove: () => listeners.delete(listener) };
+  }),
+};
+const emit = (event: string, isPlaying = false) => {
+  for (const listener of [...(mockListeners.get(event) ?? [])]) listener({ isPlaying });
+};
+
+jest.mock('expo-video', () => ({ useVideoPlayer: () => mockPlayer }));
+jest.mock('@/services/library/store', () => ({ library: { get: jest.fn() } }));
+jest.mock('@/services/downloads/store', () => ({
+  downloads: { playback: jest.fn(async () => undefined), find: jest.fn() },
+}));
+jest.mock('@/services/library/use-playback-history', () => ({ usePlaybackHistory: jest.fn() }));
+jest.mock('@/services/settings/playback-settings', () => ({
+  playbackSettings: { get: () => ({}) },
+  usePlaybackSettings: () => ({}),
+}));
+jest.mock('../background', () => ({ applyPlaybackSettings: jest.fn() }));
+jest.mock('../captions', () => ({ loadCaption: jest.fn() }));
+jest.mock('../player-actions', () => ({
+  playSource: jest.fn(async () => {}),
+  setPlayerVolume: jest.fn(),
+  setPlayerSubtitle: jest.fn((player, track) => {
+    player.subtitleTrack = track;
+  }),
+  stopPlayback: jest.fn(),
+  resumablePosition: jest.fn(),
+}));
+jest.mock('../quality', () => ({
+  loadQualities: jest.fn(async () => undefined),
+  sourceForQuality: jest.fn(),
+}));
+jest.mock('../sponsor-skipper', () => ({
+  SponsorSkipper: ({ children }: { children: React.ReactNode }) => children,
+}));
+jest.mock('@/services/sponsorblock/sponsorblock', () => ({
+  fetchSegments: jest.fn(async () => []),
+}));
+jest.mock('@/services/video-source', () => ({
+  videoSource: { getStreams: jest.fn() },
+  StreamUnavailableError: class extends Error {},
+}));
+
+const saved = jest.mocked(library);
+const source = jest.mocked(videoSource);
+const video = (id: string) => ({
+  id,
+  title: id,
+  channel: { id: 'UC', name: 'Test' },
+  thumbnails: [],
+  isLive: false,
+});
+
+beforeEach(() => {
+  jest.clearAllMocks();
+  jest.mocked(downloads.playback).mockReset().mockResolvedValue(undefined);
+  jest.mocked(downloads.find).mockReset();
+  mockListeners.clear();
+  mockPlayer.currentTime = 0;
+  mockPlayer.playing = false;
+  mockPlayer.subtitleTrack = null;
+  mockPlayer.availableSubtitleTracks = [];
+  jest.mocked(loadQualities).mockResolvedValue(undefined as never);
+  saved.get.mockReturnValue({
+    history: [],
+    favorites: [],
+    subscriptions: [],
+    playlists: [
+      {
+        id: 'p',
+        name: 'Testliste',
+        createdAt: 1,
+        updatedAt: 1,
+        videos: ['a', 'b', 'c'].map(video),
+      },
+    ],
+  });
+  source.getStreams.mockImplementation(async (id) => ({
+    source: { uri: `https://stream/${id}`, contentType: 'hls', via: 'VISIONOS' },
+    attempts: [],
+    details: { ...video(id), description: '' },
+  }));
+});
+
+it('spielt gespeicherte Playlist-Videos ohne YouTube- oder SponsorBlock-Anfrage ab', async () => {
+  jest.mocked(downloads.playback).mockImplementation(async (id) => ({
+    source: {
+      uri: `file:///downloads/${id}/index.m3u8`,
+      contentType: 'hls',
+      via: 'Download · 720p',
+    },
+    details: { ...video(id), description: '' },
+    attempts: [],
+  }));
+  jest.mocked(downloads.find).mockReturnValue({
+    id: 'local',
+    video: video('a'),
+    mode: 'video',
+    quality: 720,
+    status: 'ready',
+    bytes: 123,
+    progress: 1,
+    createdAt: 1,
+    segments: [],
+  });
+  const { result } = await start();
+  expect(playSource).toHaveBeenLastCalledWith(
+    mockPlayer,
+    expect.objectContaining({ uri: 'file:///downloads/a/index.m3u8' }),
+    expect.anything(),
+    undefined,
+    expect.objectContaining({ resume: true }),
+  );
+  await act(() => emit('playToEnd'));
+  await waitFor(() => expect(result.current.stream.kind).toBe('ready'));
+  expect(result.current.videoId).toBe('b');
+  expect(source.getStreams).not.toHaveBeenCalled();
+  expect(fetchSegments).not.toHaveBeenCalled();
+});
+
+it('wechselt bei derselben Video-ID gezielt von Video auf den Audio-Download', async () => {
+  const { result } = await start();
+  jest.mocked(downloads.playback).mockResolvedValue({
+    source: { uri: 'file:///audio.m3u8', contentType: 'hls', via: 'Download · Nur Audio' },
+    details: { ...video('a'), description: '' },
+    attempts: [],
+  });
+  await act(() => result.current.open('a', undefined, 'audio-id'));
+  await waitFor(() => expect(result.current.stream.kind).toBe('ready'));
+  expect(downloads.playback).toHaveBeenLastCalledWith('a', 'audio-id');
+  expect(playSource).toHaveBeenLastCalledWith(
+    mockPlayer,
+    expect.objectContaining({ uri: 'file:///audio.m3u8' }),
+    expect.anything(),
+    undefined,
+    expect.objectContaining({ resume: true }),
+  );
+  const count = jest.mocked(playSource).mock.calls.length;
+  await act(() => result.current.open('a'));
+  expect(playSource).toHaveBeenCalledTimes(count);
+});
+
+const caption: CaptionTrack = {
+  videoId: 'a',
+  id: '.en',
+  language: 'en',
+  name: 'English',
+  autoGenerated: false,
+  url: 'https://www.youtube.com/api/timedtext',
+};
+
+it('behält Position/Pause beim Einschalten und wählt die native Spur nach dem Laden', async () => {
+  const { result } = await start();
+  mockPlayer.currentTime = 42;
+  jest.mocked(loadCaption).mockResolvedValue('file:///captions.vtt');
+  await act(() => result.current.chooseCaption(caption));
+  expect(result.current.caption).toEqual(caption);
+  expect(playSource).toHaveBeenLastCalledWith(
+    mockPlayer,
+    expect.objectContaining({
+      externalSubtitles: [{ uri: 'file:///captions.vtt', language: 'en', label: 'English' }],
+    }),
+    expect.anything(),
+    42,
+    expect.objectContaining({ resume: false }),
+  );
+  const native = { id: 'flimmer-subtitles', language: 'en' };
+  mockPlayer.availableSubtitleTracks = [native];
+  await act(() => emit('sourceLoad'));
+  expect(mockPlayer.subtitleTrack).toBe(native);
+  await act(() => result.current.chooseCaption(undefined));
+  expect(mockPlayer.subtitleTrack).toBeNull();
+  expect(result.current.caption).toBeUndefined();
+  expect(playSource).toHaveBeenCalledTimes(2);
+});
+
+it('verwirft verspätete Untertitel nach Aus oder einem Video-Wechsel', async () => {
+  for (const action of ['off', 'next']) {
+    let release!: (uri: string) => void;
+    jest.mocked(loadCaption).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    const { result, unmount } = await start();
+    let pending!: Promise<void>;
+    await act(() => {
+      pending = result.current.chooseCaption(caption);
+    });
+    await act(() =>
+      action === 'off' ? result.current.chooseCaption(undefined) : result.current.stepPlaylist(1),
+    );
+    await act(async () => {
+      release('file:///stale.vtt');
+      await pending;
+    });
+    expect(result.current.caption).toBeUndefined();
+    expect(result.current.captionError).toBeUndefined();
+    expect(
+      jest.mocked(playSource).mock.calls.every(([, source]) => !source.externalSubtitles),
+    ).toBe(true);
+    await unmount();
+    jest.mocked(playSource).mockClear();
+  }
+});
+
+it('zeigt Abruffehler und lässt die laufende Quelle unverändert', async () => {
+  const { result } = await start();
+  jest.mocked(loadCaption).mockRejectedValue(new Error('HTTP 403'));
+  await act(() => result.current.chooseCaption(caption));
+  expect(result.current.captionError).toBe('HTTP 403');
+  expect(result.current.captionBusy).toBe(false);
+  expect(playSource).toHaveBeenCalledTimes(1);
+});
+
+it('serialisiert schnelle Qualitätswechsel und behält die laufende Wiedergabe', async () => {
+  jest.mocked(loadQualities).mockResolvedValue({ options: [], variants: [] } as never);
+  const { result } = await start();
+  jest.mocked(sourceForQuality).mockImplementation(async (source) => source);
+  mockPlayer.playing = true;
+  mockPlayer.currentTime = 42;
+  let release!: () => void;
+  jest.mocked(playSource).mockImplementationOnce(async () => {
+    mockPlayer.playing = false; // Native Vorbereitung pausiert vorübergehend.
+    mockPlayer.currentTime = 0;
+    await new Promise<void>((resolve) => {
+      release = resolve;
+    });
+  });
+  let first!: Promise<void>, second!: Promise<void>;
+  await act(() => {
+    first = result.current.chooseQuality(360);
+  });
+  await waitFor(() => expect(playSource).toHaveBeenCalledTimes(2));
+  await act(() => {
+    second = result.current.chooseQuality(720);
+  });
+  expect(playSource).toHaveBeenCalledTimes(2);
+  await act(async () => {
+    release();
+    await first;
+    await second;
+  });
+  expect(playSource).toHaveBeenCalledTimes(3);
+  expect(jest.mocked(playSource).mock.calls.at(-1)?.[4]?.resume).toBe(true);
+  expect(jest.mocked(playSource).mock.calls.at(-1)?.[3]).toBe(42);
+  expect(result.current.quality).toBe(720);
+});
+
+it('nimmt aktive Untertitel beim Qualitätswechsel mit und verwirft sie beim nächsten Video', async () => {
+  jest.mocked(loadQualities).mockResolvedValue({ options: [], variants: [] } as never);
+  const { result } = await start();
+  jest.mocked(loadCaption).mockResolvedValue('file:///captions.vtt');
+  jest.mocked(sourceForQuality).mockImplementation(async (source) => source);
+  await act(() => result.current.chooseCaption(caption));
+  await act(() => result.current.chooseQuality(360));
+  expect(playSource).toHaveBeenLastCalledWith(
+    mockPlayer,
+    expect.objectContaining({
+      externalSubtitles: expect.arrayContaining([expect.objectContaining({ language: 'en' })]),
+    }),
+    expect.anything(),
+    0,
+    expect.anything(),
+  );
+  await act(() => result.current.stepPlaylist(1));
+  expect(result.current.caption).toBeUndefined();
+  expect(mockPlayer.subtitleTrack).toBeNull();
+});
+
+async function start(id = 'a') {
+  const hook = await renderHook(useNowPlaying, { wrapper: NowPlayingProvider });
+  await act(() => {
+    expect(hook.result.current.playPlaylist('p', id)).toBe(true);
+  });
+  await waitFor(() => expect(hook.result.current.stream.kind).toBe('ready'));
+  return hook;
+}
+
+it('spielt automatisch in Reihenfolge weiter und überspringt bei doppelten Ende-Events kein Video', async () => {
+  const { result } = await start();
+  await act(() => {
+    emit('playToEnd');
+    emit('playToEnd');
+  });
+  expect(result.current.videoId).toBe('b');
+  await waitFor(() => expect(result.current.stream.kind).toBe('ready'));
+  await act(() => emit('playToEnd'));
+  expect(result.current.videoId).toBe('c');
+  await waitFor(() => expect(result.current.stream.kind).toBe('ready'));
+  await act(() => emit('playToEnd'));
+  expect(result.current.videoId).toBe('c');
+  expect(source.getStreams.mock.calls.map(([id]) => id)).toEqual(['a', 'b', 'c']);
+});
+
+it('behält die laufende Liste beim Wiederöffnen einer älteren Video-Seite', async () => {
+  const { result } = await start();
+  await act(() => result.current.stepPlaylist(1));
+  await waitFor(() => expect(result.current.stream.kind).toBe('ready'));
+  await act(() => result.current.open('a', 'p'));
+  expect(result.current.videoId).toBe('b');
+  expect(result.current.playlist?.id).toBe('p');
+  await act(() => result.current.open('einzeln'));
+  expect(result.current.playlist).toBeUndefined();
+  expect(result.current.videoId).toBe('einzeln');
+});
+
+it('startet an der gewählten Stelle und ermöglicht vor/zurück ohne Überlauf', async () => {
+  const { result } = await start('b');
+  await act(() => result.current.stepPlaylist(-1));
+  expect(result.current.videoId).toBe('a');
+  await act(() => result.current.stepPlaylist(-1));
+  expect(result.current.videoId).toBe('a');
+  await act(() => expect(result.current.playPlaylist('fehlt', 'a')).toBe(false));
+  expect(result.current.playlist?.id).toBe('p');
+});
+
+it('stoppt mit dem Sleep-Timer am Videoende, statt den nächsten Eintrag zu starten', async () => {
+  const { result } = await start();
+  await act(() => result.current.setSleepTimer('endOfVideo'));
+  await act(() => emit('playToEnd'));
+  expect(mockPlayer.pause).toHaveBeenCalled();
+  expect(result.current.videoId).toBe('a');
+  expect(result.current.sleepTimer).toBeUndefined();
+  await act(() => emit('playToEnd'));
+  expect(result.current.videoId).toBe('a');
+});
+
+it('startet nach einem abgelaufenen Minuten-Timer kein weiteres Video', async () => {
+  const clock = jest.spyOn(Date, 'now').mockReturnValue(1000);
+  try {
+    const { result } = await start();
+    await act(() => result.current.setSleepTimer(1));
+    clock.mockReturnValue(62000);
+    await act(() => emit('timeUpdate'));
+    await act(() => emit('playToEnd'));
+    expect(mockPlayer.pause).toHaveBeenCalled();
+    expect(result.current.videoId).toBe('a');
+  } finally {
+    clock.mockRestore();
+  }
+});
+
+it('verwirft beim Schließen die Warteschlange und ignoriert verspätete Ende-Events', async () => {
+  const { result } = await start();
+  await act(() => result.current.close());
+  await act(() => emit('playToEnd'));
+  expect(result.current.videoId).toBeUndefined();
+  expect(result.current.playlist).toBeUndefined();
+  expect(playSource).toHaveBeenCalledTimes(1);
+});
+
+it('ignoriert eine spät geladene Quelle, wenn bereits ein anderes Video gewählt wurde', async () => {
+  let release!: (value: Awaited<ReturnType<typeof videoSource.getStreams>>) => void;
+  source.getStreams.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  );
+  const { result } = await renderHook(useNowPlaying, { wrapper: NowPlayingProvider });
+  await act(() => {
+    result.current.playPlaylist('p', 'a');
+  });
+  await act(() => result.current.stepPlaylist(1));
+  await waitFor(() => expect(result.current.stream.kind).toBe('ready'));
+  await act(() =>
+    release({
+      source: { uri: 'https://old', contentType: 'hls', via: 'VISIONOS' },
+      attempts: [],
+      details: { ...video('a'), description: '' },
+    }),
+  );
+  expect(result.current.videoId).toBe('b');
+  expect(result.current.details?.id).toBe('b');
+  expect(playSource).toHaveBeenCalledTimes(1);
+});

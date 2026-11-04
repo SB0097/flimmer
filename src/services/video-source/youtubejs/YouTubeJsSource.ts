@@ -1,5 +1,7 @@
 import { Constants, Innertube, Platform, YTNodes, type Types, type YT } from 'youtubei.js';
 
+import { isBotCheck } from '@/lib/friendly-error';
+
 import {
   StreamUnavailableError,
   type PlaybackSource,
@@ -24,6 +26,7 @@ import { evaluatePlayerScript } from './evaluator';
 import { toComment, type CommentViewLike } from './comments';
 import { lockupToSummary, parseDurationText, type LockupLike } from './lockup';
 import { planSource } from './select-source';
+import { toCaptionTracks } from './captions';
 
 type Client = Types.InnerTubeClient;
 
@@ -40,6 +43,11 @@ type Client = Types.InnerTubeClient;
  */
 export const DEFAULT_CLIENTS: Client[] = ['VISIONOS', 'ANDROID', 'ANDROID_VR', 'IOS'];
 
+/** Frühestens nach dieser Pause erneut eine neue Sitzung wegen des Bot-Schutzes holen */
+export const SESSION_RENEWAL_INTERVAL = 2 * 60_000;
+
+const NO_SOURCE = 'Für dieses Video wurde keine abspielbare Quelle gefunden.';
+
 export interface YouTubeJsOptions {
   clients?: Client[];
   /** Speichert ein DASH-Manifest und gibt eine abspielbare URI zurück (z. B. file://) */
@@ -49,6 +57,7 @@ export interface YouTubeJsOptions {
 export class YouTubeJsSource implements VideoSource {
   readonly name = 'YouTube.js';
   private innertube?: Promise<Innertube>;
+  private lastRenewal = Number.NEGATIVE_INFINITY;
   private readonly clients: Client[];
 
   constructor(private readonly options: YouTubeJsOptions = {}) {
@@ -131,7 +140,12 @@ export class YouTubeJsSource implements VideoSource {
     // Die Streams dieses Clients werden hier nicht verwendet.
     const info = await yt.getInfo(id, { client: 'WEB' });
     const page = toRelatedPage(info);
-    return { details: toWatchDetails(id, info), related: page.items, moreRelated: page.more };
+    return {
+      details: toWatchDetails(id, info),
+      related: page.items,
+      moreRelated: page.more,
+      captions: toCaptionTracks(id, info.captions?.caption_tracks, clientHeaders('WEB')),
+    };
   }
 
   async getComments(id: string, sort: CommentSort): Promise<CommentsResult> {
@@ -144,7 +158,41 @@ export class YouTubeJsSource implements VideoSource {
   }
 
   async getStreams(id: string): Promise<StreamResult> {
-    const yt = await this.getInnertube();
+    const session = this.getInnertube();
+    const first = await this.tryClients(await session, id);
+    if ('result' in first) return first.result;
+
+    // Der Bot-Schutz hängt auch an der Gastsitzung (visitorData). Einmal mit einer
+    // frisch von YouTube geholten Sitzung wiederholen, aber nicht bei jedem Video
+    // erneut: Jede weitere Runde sind zusätzliche Anfragen aus demselben Netz.
+    const now = Date.now();
+    if (
+      !first.attempts.some((a) => isBotCheck(a.message)) ||
+      now - this.lastRenewal < SESSION_RENEWAL_INTERVAL
+    )
+      throw new StreamUnavailableError(NO_SOURCE, first.attempts);
+    this.lastRenewal = now;
+    if (this.innertube === session) this.innertube = undefined;
+    let second: Awaited<ReturnType<typeof this.tryClients>>;
+    try {
+      second = await this.tryClients(await this.getInnertube(), id);
+    } catch (error) {
+      const failed = { via: 'neue Sitzung', ok: false, message: errorMessage(error) };
+      throw new StreamUnavailableError(NO_SOURCE, [...first.attempts, failed]);
+    }
+    const renewed = (attempts: StreamAttempt[]) =>
+      attempts.map((a) => ({ ...a, via: `${a.via} (neue Sitzung)` }));
+    if ('result' in second) {
+      const attempts = [...first.attempts, ...renewed(second.result.attempts)];
+      return { ...second.result, attempts };
+    }
+    throw new StreamUnavailableError(NO_SOURCE, [...first.attempts, ...renewed(second.attempts)]);
+  }
+
+  private async tryClients(
+    yt: Innertube,
+    id: string,
+  ): Promise<{ result: StreamResult } | { attempts: StreamAttempt[] }> {
     const attempts: StreamAttempt[] = [];
     let details: VideoDetails | undefined;
 
@@ -170,16 +218,19 @@ export class YouTubeJsSource implements VideoSource {
         }
 
         attempts.push({ via: client, ok: true, message: picked.message });
-        return { source: picked.source, details, attempts };
+        return {
+          result: {
+            source: picked.source,
+            details,
+            attempts,
+            captions: toCaptionTracks(id, info.captions?.caption_tracks, clientHeaders(client)),
+          },
+        };
       } catch (error) {
         attempts.push({ via: client, ok: false, message: errorMessage(error) });
       }
     }
-
-    throw new StreamUnavailableError(
-      'Für dieses Video wurde keine abspielbare Quelle gefunden.',
-      attempts,
-    );
+    return { attempts };
   }
 
   private async pickSource(

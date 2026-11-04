@@ -1,9 +1,11 @@
 import { Image } from 'expo-image';
-import { Link, router } from 'expo-router';
+import { Link, useRouter } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
 import { ThemedText } from '@/components/themed-text';
 import { VideoThumbnail } from '@/components/video-thumbnail';
+import { SaveToPlaylistButton } from '@/components/playlist-picker';
+import { DownloadButton } from '@/components/download-button';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { formatDuration } from '@/lib/format';
@@ -11,6 +13,7 @@ import type { VideoSummary } from '@/services/video-source';
 
 /** Video-Kachel im YouTube-Stil: großes Vorschaubild, darunter Titel und Kanal */
 export function VideoCard({ video }: { video: VideoSummary }) {
+  const router = useRouter();
   const theme = useTheme();
   const meta = [video.channel.name, video.viewCountText, video.publishedText]
     .filter(Boolean)
@@ -76,6 +79,10 @@ export function VideoCard({ video }: { video: VideoSummary }) {
               {meta}
             </ThemedText>
           </Pressable>
+        </View>
+        <View>
+          <SaveToPlaylistButton video={video} compact />
+          <DownloadButton video={video} compact />
         </View>
       </View>
     </View>

@@ -3,17 +3,22 @@
 Werbefreier YouTube-Player für Android, gebaut mit Expo.
 
 - Keine Werbung, Sponsor-Teile werden per [SponsorBlock](https://sponsor.ajay.app) übersprungen
-- Kein Google-Konto nötig, alle Daten bleiben auf dem Gerät
+- Kein Google-Konto nötig; Verlauf, Favoriten, Abos und Playlists werden lokal gespeichert
 - Hintergrund-Wiedergabe und Bild-in-Bild
 - Lokale Bibliothek: Verlauf mit Sehpositionen, Favoriten und Kanal-Abos
 - Kanalseiten und eine persönliche „Für dich“-Startseite ohne Google-Login
+- Eigene Playlists mit sortierbaren Videos und fortlaufender Wiedergabe
+- Video- und Audio-Downloads für die Offline-Wiedergabe
+- Lokaler Import von Abos, Verlauf und Playlists aus Google Takeout
+- Untertitel mit Sprachwahl, einschließlich automatisch erzeugter Spuren
+- Kompakte Leisten, Flimmer-Logo und Petrol-Akzente im hellen und dunklen Design
 
 ## Bibliothek und Startseite
 
 Unter einem Video kannst du es als Favorit markieren und den Kanal abonnieren. Über den
 Kanalnamen oder das Kanalbild öffnest du seine Videos. In der Bibliothek findest du Verlauf,
 Favoriten und die ungesehenen Videos deiner Abos. Favoriten speichern nur den Eintrag,
-nicht die Videodatei; zum Abspielen brauchst du weiterhin eine Internetverbindung.
+nicht die Videodatei; ohne passenden Download brauchst du zum Abspielen eine Internetverbindung.
 
 Der Verlauf beginnt nach fünf abgespielten Sekunden. Positionen werden während der Wiedergabe
 regelmäßig sowie beim Pausieren und Wechseln gespeichert, auch im Mini-Player und Hintergrund.
@@ -31,7 +36,79 @@ Interessen-Videos abgefragt, mit maximal drei Anfragen gleichzeitig. Bei vielen 
 werden beim nächsten Aktualisieren weitere Kanäle berücksichtigt. Der Verlauf hält die
 letzten 1.000 Videos vor; Favoriten bleiben unabhängig davon erhalten.
 
+## Playlists
+
+Unter **Bibliothek → Meine Playlists** kannst du Listen anlegen, umbenennen und löschen.
+Über das Playlist-Symbol an einer Videokachel oder **Speichern** unter dem Player fügst du
+ein Video einer oder mehreren Listen hinzu. Auf der Detailseite lässt sich die Reihenfolge
+mit den Pfeilen ändern; Entfernen aus einer Playlist lässt Verlauf und Favoriten bestehen.
+
+**Alles abspielen** startet beim ersten Eintrag, Antippen eines Videos an dieser Stelle.
+Danach folgt automatisch das nächste Video, auch im Mini-Player und Hintergrund. Im Player
+gibt es Vor/Zurück, im Mini-Player einen Knopf für das nächste Video. Am Listenende wird nicht
+von vorn begonnen; ein Sleep-Timer kann die Fortsetzung vorher anhalten.
+
+Die gestartete Reihenfolge bleibt für die laufende Wiedergabe erhalten. Änderungen an der
+gespeicherten Playlist gelten beim nächsten Start der Liste. Playlists überstehen App-Neustarts;
+sie speichern Videoeinträge, keine heruntergeladenen Videodateien. Zum Abspielen ist weiterhin
+ohne passenden Download eine Internetverbindung erforderlich.
+
+## Downloads
+
+Über das Download-Symbol an einer Videokachel oder **Download** unter dem Player speicherst
+du ein Video (bis 360p oder 720p, je nach verfügbarer Auflösung) oder nur die Tonspur.
+Unter **Bibliothek → Downloads** findest du Fortschritt, Speicherverbrauch, Abbrechen,
+erneutes Laden und Löschen. Video und Audio können getrennt gespeichert werden.
+
+Bitte Flimmer während des Downloads geöffnet lassen. Die Warteschlange lädt einen Eintrag
+nach dem anderen. Nach einem App-Abbruch werden unvollständige Downloads als unterbrochen
+angezeigt und lassen sich neu starten; dabei wird die Datei vollständig neu geladen.
+Livestreams und geschützte oder nicht unterstützte Stream-Formate sind nicht herunterladbar.
+
+Fertige Downloads spielen ohne Internet im gewohnten Player, auch aus Verlauf und Playlists.
+Falls Video und Audio gespeichert sind, wird automatisch das Video bevorzugt; auf der
+Download-Seite lässt sich die Tonspur gezielt starten. Sehpositionen, Hintergrund-Wiedergabe
+und Sleep-Timer funktionieren weiter. Verfügbare SponsorBlock-Segmente werden beim Download
+mitgespeichert. Kommentare und neue Vorschläge stehen offline nicht zur Verfügung.
+
+Die Dateien bleiben im privaten App-Speicher und überstehen App-Updates. Löschen eines
+Downloads entfernt nur diese Dateien; Verlauf, Favoriten und Playlists bleiben erhalten.
+Eine Deinstallation oder das Löschen der App-Daten entfernt auch die Downloads.
+
+## YouTube-Takeout-Import
+
+Unter **Bibliothek → YouTube-Daten importieren** wählst du dein Takeout-ZIP oder entpackte
+Exportdateien aus: Abos als `subscriptions.csv`, Wiedergabeverlauf als JSON oder HTML und
+Playlists als CSV. Exportiere bei [Google Takeout](https://takeout.google.com/) nur die
+gewünschten YouTube-Daten ohne Videodateien. Es sind höchstens 64 MB auf einmal möglich;
+große Archive kannst du vorher entpacken und die gewünschten Dateien einzeln auswählen.
+
+Flimmer zeigt vor dem Hinzufügen eine Vorschau. Die Verarbeitung bleibt auf dem Gerät.
+Vorhandene Abos, Playlist-Namen/-Reihenfolgen und Sehpositionen gleicher Videos werden nicht
+überschrieben. Derselbe Export kann erneut eingelesen werden, ohne doppelte Einträge anzulegen.
+Der Verlauf enthält wie bisher höchstens die 1.000 neuesten unterschiedlichen Videos.
+
+Takeout enthält keine genauen Sehpositionen oder angesehenen Dauern. Importierter Verlauf
+wird deshalb gekennzeichnet und als Interesse für „Für dich“ berücksichtigt. Bei unbekannten
+HTML-Datumsformaten steht „Zeitpunkt unbekannt“. Fehlende Metadaten von Playlist-Videos
+werden beim späteren Öffnen ergänzt. Für den Import ist kein Google-Login in Flimmer nötig.
+
 > 🚧 Frühe Entwicklungsphase
+
+## Untertitel
+
+Im Zahnrad-Menü des Players findest du **Untertitel**. Wähle eine verfügbare Sprache
+oder **Aus**. Automatisch erzeugte Spuren sind gekennzeichnet. Ohne verfügbare Spur
+zeigt das Menü einen Hinweis; Fehler beim Abruf lassen sich durch erneute Auswahl wiederholen.
+
+Untertitel werden erst bei Auswahl von YouTube geladen und als entbehrliche WebVTT-Datei
+im App-Cache gehalten. Der Android-Player zeigt sie auch im Vollbild und in Bild-im-Bild;
+die Auswahl bleibt beim Qualitätswechsel und im Mini-Player erhalten. Ein neues Video
+beginnt mit ausgeschalteten Untertiteln. Es gibt keine automatische Übersetzung und
+keinen Untertitel-Download für die Offline-Bibliothek.
+
+Die Android-Anbindung ergänzt `expo-video` per `patch-package` um externe WebVTT-Spuren.
+Deshalb erfordert diese Änderung einen neuen nativen Build; Expo Go reicht nicht aus.
 
 ## Tech-Stack
 

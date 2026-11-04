@@ -1,6 +1,7 @@
 import { useEvent } from 'expo';
 import {
-  router,
+  useRouter,
+  Stack,
   useFocusEffect,
   useIsFocused,
   useLocalSearchParams,
@@ -23,25 +24,30 @@ import {
   BackHandler,
   FlatList,
   Pressable,
+  Platform,
+  StatusBar as NativeStatusBar,
   StyleSheet,
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { PlayerVideo } from '@/components/player-video';
 import { ThemedText } from '@/components/themed-text';
 import { VideoCard } from '@/components/video-card';
 import { CommentsPanel } from '@/components/watch/comments-panel';
 import { PlayerControls } from '@/components/watch/player-controls';
+import { PlaylistControls } from '@/components/watch/playlist-controls';
 import { PlayerMenu } from '@/components/watch/player-menu';
 import { SponsorOverlay } from '@/components/watch/sponsor-overlay';
 import { useMinimizeGesture } from '@/components/watch/use-minimize-gesture';
 import { VideoInfo } from '@/components/watch/video-info';
-import { Spacing } from '@/constants/theme';
+import { Spacing, TabBarHeight } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { friendlyStreamError } from '@/lib/friendly-error';
+import { playlistNeighbor } from '@/lib/playlists';
 import { library } from '@/services/library/store';
+import { downloads } from '@/services/downloads/store';
 import { getMiniPlayerFrame, type Frame } from '@/services/playback/mini-frame';
 import { useNowPlaying, type StreamState } from '@/services/playback/now-playing';
 import {
@@ -53,9 +59,19 @@ import {
 } from '@/services/video-source';
 
 export default function WatchScreen() {
-  const { id, from } = useLocalSearchParams<{ id: string; from?: string }>();
+  const router = useRouter();
+  const {
+    id: routeId,
+    from,
+    playlist: playlistId,
+    download: downloadId,
+  } = useLocalSearchParams<{ id: string; from?: string; playlist?: string; download?: string }>();
   const theme = useTheme();
   const nowPlaying = useNowPlaying();
+  const id =
+    playlistId && nowPlaying.playlist?.id === playlistId && nowPlaying.videoId
+      ? nowPlaying.videoId
+      : routeId;
   const focused = useIsFocused();
   const { player, open, retry, chooseQuality: choose, qualities, quality, segments } = nowPlaying;
   // Bis der Player auf dieses Video umgeschaltet hat, gilt es als „lädt“
@@ -66,7 +82,9 @@ export default function WatchScreen() {
   const [related, setRelated] = useState<VideoSummary[]>([]);
   const moreRelated = useRef<RelatedPage['more']>(undefined);
   const loadingMore = useRef(false);
-  const [comments, setComments] = useState<CommentsResult | null>();
+  const pageRequest = useRef(0);
+  const [loadedComments, setComments] = useState<{ id: string; result: CommentsResult | null }>();
+  const comments = loadedComments?.id === id ? loadedComments.result : undefined;
   const [showComments, setShowComments] = useState(false);
   const [showQuality, setShowQuality] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -81,20 +99,38 @@ export default function WatchScreen() {
   // die Wiedergabe läuft im Mini-Player weiter.
   useFocusEffect(
     useCallback(() => {
-      open(id);
-      return () => {
+      open(routeId, playlistId, downloadId);
+    }, [routeId, playlistId, downloadId, open]),
+  );
+  useFocusEffect(
+    useCallback(
+      () => () => {
         setIsFullscreen(false);
         ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
-      };
-    }, [id, open]),
+      },
+      [],
+    ),
   );
 
   // Seitendaten (Beschreibung, nächste Videos) und Kommentare laden
   useEffect(() => {
+    if (!focused) return;
+    const request = pageRequest.current + 1;
+    pageRequest.current = request;
+    loadingMore.current = false;
+    moreRelated.current = undefined;
     let cancelled = false;
 
     async function loadPage() {
       try {
+        const local = downloads.find(id, downloadId);
+        if (local) {
+          if (!cancelled) {
+            setPage({ details: local.details ?? { ...local.video, description: '' }, related: [] });
+            setRelated([]);
+          }
+          return;
+        }
         const result = await videoSource.getWatchPage(id);
         if (cancelled) return;
         setPage(result);
@@ -108,11 +144,15 @@ export default function WatchScreen() {
     }
 
     async function loadComments() {
+      if (downloads.find(id, downloadId)) {
+        if (!cancelled) setComments({ id, result: null });
+        return;
+      }
       try {
         const result = await videoSource.getComments(id, 'top');
-        if (!cancelled) setComments(result);
+        if (!cancelled) setComments({ id, result });
       } catch {
-        if (!cancelled) setComments(null);
+        if (!cancelled) setComments({ id, result: null });
       }
     }
 
@@ -120,27 +160,33 @@ export default function WatchScreen() {
     loadComments();
     return () => {
       cancelled = true;
+      pageRequest.current = request + 1;
     };
-  }, [id]);
+  }, [id, focused, downloadId]);
 
   const loadMore = useCallback(async () => {
-    if (!moreRelated.current || loadingMore.current) return;
+    if (page?.details.id !== id || !moreRelated.current || loadingMore.current) return;
     loadingMore.current = true;
+    const token = pageRequest.current;
     try {
       const next = await moreRelated.current();
+      if (token !== pageRequest.current) return;
       moreRelated.current = next.more;
       setRelated((prev) => {
         const seen = new Set(prev.map((v) => v.id));
         return [...prev, ...next.items.filter((v) => !seen.has(v.id) && v.id !== id)];
       });
     } catch {
-      moreRelated.current = undefined;
+      if (token === pageRequest.current) moreRelated.current = undefined;
     } finally {
-      loadingMore.current = false;
+      if (token === pageRequest.current) loadingMore.current = false;
     }
-  }, [id]);
+  }, [id, page]);
 
-  const details = page?.details ?? (stream.kind === 'ready' ? stream.result.details : undefined);
+  const details =
+    (page?.details.id === id ? page.details : undefined) ??
+    (stream.kind === 'ready' ? stream.result.details : undefined);
+  const queueIds = nowPlaying.playlist?.videoIds ?? [];
 
   const chooseQuality = useCallback(
     (height: number | undefined) => {
@@ -169,7 +215,7 @@ export default function WatchScreen() {
     for (let i = routes.length - 1; i >= 0 && routes[i].name === 'watch/[id]'; i--) count++;
     if (count > 0 && router.canDismiss()) router.dismiss(count);
     else router.replace('/');
-  }, [navigation]);
+  }, [navigation, router]);
 
   // Lage dieser Seite im Fenster – Bezugspunkt für die Mini-Player-Position
   const rootRef = useRef<ComponentRef<typeof View>>(null);
@@ -183,6 +229,13 @@ export default function WatchScreen() {
 
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const insets = useSafeAreaInsets();
+  // Nach dem Einblenden der Systemleisten können die Insets noch vom Vollbild
+  // stammen (top=0). Auf Android die native Statusleistenhöhe als Untergrenze
+  // verwenden, bis die neuen Insets eintreffen.
+  const portraitTop = Math.max(
+    insets.top,
+    Platform.OS === 'android' ? (NativeStatusBar.currentHeight ?? 0) : 0,
+  );
   const swipe = useMinimizeGesture({
     isFullscreen,
     getFrames: () => {
@@ -196,7 +249,7 @@ export default function WatchScreen() {
         : // Noch nie gemessen → übliche Position unten rechts über der Tab-Leiste
           {
             x: screenWidth - 8 - width,
-            y: screenHeight - insets.bottom - 80 - 8 - height,
+            y: screenHeight - insets.bottom - TabBarHeight - 8 - height,
             width,
             height,
           };
@@ -204,7 +257,7 @@ export default function WatchScreen() {
       // Bewusst berechnet statt gemessen: Messen würde laufende Animationen mitzählen.
       const video: Frame = {
         x: 0,
-        y: insets.top,
+        y: portraitTop,
         width: screenWidth,
         height: (screenWidth * 9) / 16,
       };
@@ -255,7 +308,7 @@ export default function WatchScreen() {
   const miniFrame = getMiniPlayerFrame();
   const navTop = miniFrame
     ? miniFrame.y - origin.y + miniFrame.height + 8
-    : screenHeight - insets.bottom - 80;
+    : screenHeight - insets.bottom - TabBarHeight;
   const navHeight = Math.max(0, screenHeight - navTop);
 
   useEffect(() => {
@@ -326,7 +379,17 @@ export default function WatchScreen() {
   );
 
   return (
-    <View ref={rootRef} onLayout={measureRoot} style={styles.container}>
+    <View
+      ref={rootRef}
+      onLayout={measureRoot}
+      style={[styles.container, !isFullscreen && { paddingBottom: insets.bottom }]}>
+      <Stack.Screen
+        options={{
+          statusBarHidden: isFullscreen,
+          statusBarStyle: 'light',
+          navigationBarHidden: isFullscreen,
+        }}
+      />
       <Animated.View
         style={[
           styles.container,
@@ -337,7 +400,7 @@ export default function WatchScreen() {
         {!isFullscreen ? (
           <View pointerEvents="none" style={StyleSheet.absoluteFill}>
             <Animated.View
-              style={[styles.statusBand, { height: insets.top, opacity: swipe.backgroundOpacity }]}
+              style={[styles.statusBand, { height: portraitTop, opacity: swipe.backgroundOpacity }]}
             />
             <Animated.View
               style={[
@@ -356,14 +419,24 @@ export default function WatchScreen() {
         ) : null}
         <StatusBar style="light" hidden={isFullscreen} />
         <View {...swipe.panHandlers} style={isFullscreen && styles.flex}>
-          <SafeAreaView edges={isFullscreen ? [] : ['top']} style={isFullscreen && styles.flex}>
-            <Animated.View style={isFullscreen ? styles.flex : swipe.videoStyle}>
+          <View style={isFullscreen ? styles.flex : { paddingTop: portraitTop }}>
+            <Animated.View
+              style={isFullscreen ? [styles.flex, swipe.fullscreenStyle] : swipe.videoStyle}>
               <View style={isFullscreen ? styles.videoFullscreen : styles.videoBox}>
                 {stream.kind === 'ready' && focused ? (
                   <>
-                    <PlayerVideo style={StyleSheet.absoluteFill} />
+                    {/* SurfaceView nach einer echten Fenstergrößenänderung frisch anhängen.
+                        Der globale Player bleibt bestehen, verliert also weder Position noch Ton. */}
+                    <PlayerVideo
+                      key={`video:${screenWidth}x${screenHeight}`}
+                      style={StyleSheet.absoluteFill}
+                    />
                     {!failure ? (
                       <PlayerControls
+                        // Nach Rotation mit der final gemessenen Geometrie neu aufbauen.
+                        // So behält der PanResponder der Zeitleiste weder alte Breiten
+                        // noch einen während des Layoutwechsels begonnenen Touch-Zustand.
+                        key={`${id}:${isFullscreen ? 'fullscreen' : 'inline'}:${screenWidth}x${screenHeight}`}
                         player={player}
                         isLive={Boolean(details?.isLive)}
                         isFullscreen={isFullscreen}
@@ -371,6 +444,16 @@ export default function WatchScreen() {
                         onOpenSettings={() => setShowQuality(true)}
                         qualityLabel={qualities ? qualityLabel : undefined}
                         segments={segments}
+                        onPrevious={
+                          playlistNeighbor(queueIds, id, -1)
+                            ? () => nowPlaying.stepPlaylist(-1)
+                            : undefined
+                        }
+                        onNext={
+                          playlistNeighbor(queueIds, id, 1)
+                            ? () => nowPlaying.stepPlaylist(1)
+                            : undefined
+                        }
                         isLoading={isLoading}
                       />
                     ) : null}
@@ -408,28 +491,33 @@ export default function WatchScreen() {
                 ) : null}
               </View>
             </Animated.View>
-          </SafeAreaView>
+          </View>
         </View>
 
         {!isFullscreen ? (
           <Animated.View style={[styles.flex, { opacity: swipe.contentOpacity }]}>
             <FlatList
-              data={related}
+              data={page?.details.id === id ? related : []}
               keyExtractor={(v) => v.id}
               renderItem={({ item }) => <VideoCard video={item} />}
               ListHeaderComponent={
-                <VideoInfo
-                  details={details}
-                  comments={comments}
-                  onOpenComments={() => setShowComments(true)}
-                  diagnostics={diagnostics}
-                />
+                <>
+                  <PlaylistControls />
+                  <VideoInfo
+                    key={id}
+                    details={details}
+                    comments={comments}
+                    onOpenComments={() => setShowComments(true)}
+                    diagnostics={diagnostics}
+                  />
+                </>
               }
               onEndReached={loadMore}
               onEndReachedThreshold={1.5}
             />
             {showComments ? (
               <CommentsPanel
+                key={id}
                 videoId={id}
                 initial={comments ?? undefined}
                 onClose={() => setShowComments(false)}
@@ -445,6 +533,17 @@ export default function WatchScreen() {
           quality={quality}
           autoHeight={quality === undefined ? videoTrack?.size?.height : undefined}
           onSelectQuality={chooseQuality}
+          captions={
+            stream.kind === 'ready' && stream.result.captions?.length
+              ? stream.result.captions
+              : page?.details.id === id
+                ? page.captions
+                : []
+          }
+          caption={nowPlaying.caption}
+          captionBusy={nowPlaying.captionBusy}
+          captionError={nowPlaying.captionError}
+          onSelectCaption={nowPlaying.chooseCaption}
           sleepTimer={nowPlaying.sleepTimer}
           onSetSleepTimer={nowPlaying.setSleepTimer}
           isLive={Boolean(details?.isLive)}

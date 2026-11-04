@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Animated, Easing, PanResponder } from 'react-native';
 
 import type { Frame } from '@/services/playback/mini-frame';
@@ -46,8 +46,38 @@ export function useMinimizeGesture(options: Options) {
 
   // eslint-disable-next-line react-hooks/refs -- Handler lesen die Refs erst beim Ziehen, nicht beim Rendern
   const [controller] = useState(() => {
-    const { progress, dx, dy, scaleDelta, lift } = anim;
+    const { progress, dx, dy, scaleDelta, lift, exit } = anim;
     let distance = 1;
+    let transitioning = false;
+    let disposed = false;
+
+    const resetRotation = () => {
+      lift.stopAnimation();
+      exit.stopAnimation();
+      lift.setValue(0);
+      exit.setValue(0);
+      transitioning = false;
+    };
+
+    const rotateAfterAnimation = (fullscreen: boolean) => {
+      if (transitioning || disposed) return;
+      transitioning = true;
+      // Erst die Geste abschließen, dann das native Layout drehen. Keine
+      // Rückfederung gleichzeitig mit Rotation und SurfaceView-Neuaufbau.
+      Animated.timing(fullscreen ? lift : exit, {
+        toValue: fullscreen ? 0 : 1,
+        duration: 160,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (!finished || disposed) {
+          transitioning = false;
+          return;
+        }
+        if (fullscreen) latest.current.onEnterFullscreen();
+        else latest.current.onExitFullscreen();
+      });
+    };
 
     /** Weg vom aktuellen Video-Platz zum Mini-Fenster festlegen */
     const aim = () => {
@@ -94,21 +124,42 @@ export function useMinimizeGesture(options: Options) {
           stiffness: 220,
           useNativeDriver: true,
         }),
-        Animated.spring(lift, { toValue: 0, damping: 18, stiffness: 240, useNativeDriver: true }),
+        Animated.spring(lift, {
+          toValue: 0,
+          damping: 22,
+          stiffness: 240,
+          overshootClamping: true,
+          useNativeDriver: true,
+        }),
+        Animated.spring(exit, {
+          toValue: 0,
+          damping: 22,
+          stiffness: 240,
+          overshootClamping: true,
+          useNativeDriver: true,
+        }),
       ]).start();
 
     const responder = PanResponder.create({
       // Deutlich senkrecht: nach unten immer, nach oben nur im Hochformat (→ Vollbild)
       onMoveShouldSetPanResponderCapture: (_, g) =>
+        !transitioning &&
         Math.abs(g.dy) > 12 &&
         Math.abs(g.dy) > Math.abs(g.dx) * 1.5 &&
         (g.dy > 0 || !latest.current.isFullscreen),
       onPanResponderTerminationRequest: () => false,
       onPanResponderGrant: () => {
+        progress.stopAnimation();
+        lift.stopAnimation();
+        exit.stopAnimation();
         if (!latest.current.isFullscreen) aim();
       },
       onPanResponderMove: (_, g) => {
-        if (latest.current.isFullscreen) return;
+        if (transitioning) return;
+        if (latest.current.isFullscreen) {
+          exit.setValue(Math.min(1, Math.max(0, g.dy / 240)));
+          return;
+        }
         if (g.dy < 0) {
           // Hochwischen: Video folgt dem Finger ein Stück und wird etwas größer
           lift.setValue(Math.min(1, -g.dy / LIFT_DISTANCE));
@@ -119,13 +170,15 @@ export function useMinimizeGesture(options: Options) {
         progress.setValue(Math.min(1, Math.max(0, g.dy / distance)));
       },
       onPanResponderRelease: (_, g) => {
+        if (transitioning) return;
         if (latest.current.isFullscreen) {
-          if (g.dy > 120 || g.vy > DONE_VELOCITY) latest.current.onExitFullscreen();
+          if (g.dy > 120 || g.vy > DONE_VELOCITY) rotateAfterAnimation(false);
+          else springBack();
           return;
         }
         if (g.dy < 0) {
-          if (g.dy < -60 || g.vy < -DONE_VELOCITY) latest.current.onEnterFullscreen();
-          springBack();
+          if (g.dy < -60 || g.vy < -DONE_VELOCITY) rotateAfterAnimation(true);
+          else springBack();
           return;
         }
         if (g.dy / distance > DONE_PROGRESS || g.vy > DONE_VELOCITY) minimize();
@@ -134,14 +187,34 @@ export function useMinimizeGesture(options: Options) {
       onPanResponderTerminate: springBack,
     });
 
-    return { panHandlers: responder.panHandlers, minimize, expandFromMini };
+    return {
+      panHandlers: responder.panHandlers,
+      minimize,
+      expandFromMini,
+      resetRotation,
+      activate: () => {
+        disposed = false;
+      },
+      dispose: () => {
+        disposed = true;
+        progress.stopAnimation();
+        resetRotation();
+      },
+    };
   });
+
+  useLayoutEffect(() => controller.resetRotation(), [controller, options.isFullscreen]);
+  useEffect(() => {
+    controller.activate();
+    return () => controller.dispose();
+  }, [controller]);
 
   return {
     panHandlers: controller.panHandlers,
     minimize: controller.minimize,
     expandFromMini: controller.expandFromMini,
     videoStyle: anim.videoStyle,
+    fullscreenStyle: anim.fullscreenStyle,
     contentOpacity: anim.contentOpacity,
     backgroundOpacity: anim.backgroundOpacity,
     navOpacity: anim.navOpacity,
@@ -157,12 +230,20 @@ function createAnimation(startMinimized: boolean) {
   const scaleDelta = new Animated.Value(startMinimized ? -1 : 0);
   /** 0–1 beim Hochwischen (Richtung Vollbild) */
   const lift = new Animated.Value(0);
+  const exit = new Animated.Value(0);
   return {
     progress,
     dx,
     dy,
     scaleDelta,
     lift,
+    exit,
+    fullscreenStyle: {
+      transform: [
+        { translateY: Animated.multiply(exit, 24) },
+        { scale: Animated.add(1, Animated.multiply(exit, -0.04)) },
+      ],
+    },
     /** Für das Video: schrumpft und wandert Richtung Mini-Player */
     videoStyle: {
       transform: [

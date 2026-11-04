@@ -20,11 +20,8 @@ export function SubscribeButton({ channel }: { channel: ChannelRef }) {
       }
       accessibilityState={{ selected: subscribed }}
       onPress={() => library.toggleSubscription(channel)}
-      style={[
-        styles.button,
-        { backgroundColor: subscribed ? theme.backgroundElement : theme.text },
-      ]}>
-      <ThemedText type="smallBold" style={{ color: subscribed ? theme.text : theme.background }}>
+      style={[styles.button, { backgroundColor: subscribed ? theme.accentSurface : theme.accent }]}>
+      <ThemedText type="smallBold" style={{ color: subscribed ? theme.accent : theme.onAccent }}>
         {subscribed ? 'Abonniert' : 'Abonnieren'}
       </ThemedText>
     </Pressable>
@@ -45,7 +42,7 @@ export function FavoriteButton({ video }: { video: VideoSummary }) {
       <MaterialIcons
         name={saved ? 'favorite' : 'favorite-border'}
         size={20}
-        color={saved ? '#FF4565' : theme.text}
+        color={saved ? theme.accent : theme.text}
       />
       <ThemedText type="smallBold">{saved ? 'Favorisiert' : 'Favorit'}</ThemedText>
     </Pressable>

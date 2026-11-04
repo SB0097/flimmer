@@ -9,10 +9,12 @@ import {
   View,
   type GestureResponderEvent,
   type LayoutChangeEvent,
+  type ViewStyle,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ThemedText } from '@/components/themed-text';
-import { Spacing } from '@/constants/theme';
+import { Brand, Spacing } from '@/constants/theme';
 import { formatDuration } from '@/lib/format';
 import { CATEGORY_INFO, type Segment } from '@/lib/segments';
 import { useSponsorSettings } from '@/services/settings/sponsor-settings';
@@ -25,7 +27,6 @@ import {
 } from '@/lib/tap-seek';
 
 const HIDE_AFTER_MS = 3000;
-const RED = '#FF0033';
 
 interface Props {
   player: VideoPlayer;
@@ -40,6 +41,8 @@ interface Props {
   segments?: Segment[];
   /** Während des Ladens nur der Ladekreis, kein Play-Knopf dahinter (wie YouTube) */
   isLoading?: boolean;
+  onPrevious?: () => void;
+  onNext?: () => void;
 }
 
 /**
@@ -56,7 +59,10 @@ export function PlayerControls({
   qualityLabel,
   segments = [],
   isLoading = false,
+  onPrevious,
+  onNext,
 }: Props) {
+  const insets = useSafeAreaInsets();
   const sponsorSettings = useSponsorSettings();
   const markers = segments.filter((seg) => sponsorSettings[seg.category] !== 'off');
   const { isPlaying } = useEvent(player, 'playingChange', { isPlaying: player.playing });
@@ -137,18 +143,51 @@ export function PlayerControls({
       {visible && !seekHint ? (
         <View pointerEvents="box-none" style={[StyleSheet.absoluteFill, styles.scrim]}>
           <View pointerEvents="box-none" style={styles.center}>
-            {isLoading ? null : (
-              <Pressable
-                onPress={togglePlay}
-                style={styles.playButton}
-                accessibilityRole="button"
-                accessibilityLabel={isPlaying ? 'Pause' : 'Abspielen'}>
-                <MaterialIcons name={isPlaying ? 'pause' : 'play-arrow'} size={44} color="#fff" />
-              </Pressable>
-            )}
+            <View style={styles.playRow}>
+              {onPrevious || onNext ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Vorheriges Video"
+                  accessibilityState={{ disabled: !onPrevious }}
+                  disabled={!onPrevious}
+                  onPress={onPrevious}
+                  style={[styles.skipButton, !onPrevious && { opacity: 0.3 }]}>
+                  <MaterialIcons name="skip-previous" size={32} color="#fff" />
+                </Pressable>
+              ) : null}
+              {isLoading ? null : (
+                <Pressable
+                  onPress={togglePlay}
+                  style={styles.playButton}
+                  accessibilityRole="button"
+                  accessibilityLabel={isPlaying ? 'Pause' : 'Abspielen'}>
+                  <MaterialIcons name={isPlaying ? 'pause' : 'play-arrow'} size={44} color="#fff" />
+                </Pressable>
+              )}
+              {onPrevious || onNext ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Nächstes Video"
+                  accessibilityState={{ disabled: !onNext }}
+                  disabled={!onNext}
+                  onPress={onNext}
+                  style={[styles.skipButton, !onNext && { opacity: 0.3 }]}>
+                  <MaterialIcons name="skip-next" size={32} color="#fff" />
+                </Pressable>
+              ) : null}
+            </View>
           </View>
 
-          <View pointerEvents="box-none" style={styles.bottomRow}>
+          <View
+            pointerEvents="box-none"
+            style={[
+              styles.bottomRow,
+              isFullscreen && {
+                paddingLeft: insets.left + 24,
+                paddingRight: insets.right + 24,
+                paddingBottom: insets.bottom + 44,
+              },
+            ]}>
             {isLive ? (
               <View style={styles.liveBadge}>
                 <View style={styles.liveDot} />
@@ -205,6 +244,16 @@ export function PlayerControls({
       {/* Im Vollbild nur zusammen mit der Steuerung zeigen, im Hochformat immer (wie YouTube) */}
       {!isLive && duration > 0 && (visible || !isFullscreen) ? (
         <SeekBar
+          insetStyle={
+            isFullscreen
+              ? {
+                  left: insets.left + 24,
+                  right: insets.right + 24,
+                  bottom: insets.bottom + 16,
+                  height: 32,
+                }
+              : undefined
+          }
           markers={markers.map((seg) => ({
             key: seg.uuid,
             from: seg.start / duration,
@@ -246,6 +295,7 @@ function SeekHint({ side, total }: { side: 'left' | 'right'; total: number }) {
 }
 
 interface SeekBarProps {
+  insetStyle?: ViewStyle;
   markers: { key: string; from: number; to: number; color: string }[];
   fraction: number;
   buffered: number;
@@ -254,7 +304,15 @@ interface SeekBarProps {
   onRelease: (fraction: number) => void;
 }
 
-function SeekBar({ markers, fraction, buffered, showThumb, onDrag, onRelease }: SeekBarProps) {
+function SeekBar({
+  insetStyle,
+  markers,
+  fraction,
+  buffered,
+  showThumb,
+  onDrag,
+  onRelease,
+}: SeekBarProps) {
   const width = useRef(0);
   const startX = useRef(0);
   const callbacks = useRef({ onDrag, onRelease });
@@ -287,7 +345,7 @@ function SeekBar({ markers, fraction, buffered, showThumb, onDrag, onRelease }: 
 
   return (
     <View
-      style={styles.seekTouch}
+      style={[styles.seekTouch, insetStyle]}
       onLayout={(e) => (width.current = e.nativeEvent.layout.width)}
       accessibilityRole="adjustable"
       accessibilityLabel="Fortschritt"
@@ -313,6 +371,8 @@ function SeekBar({ markers, fraction, buffered, showThumb, onDrag, onRelease }: 
 }
 
 const styles = StyleSheet.create({
+  playRow: { flexDirection: 'row', alignItems: 'center', gap: 24 },
+  skipButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   scrim: {
     backgroundColor: 'rgba(0,0,0,0.45)',
   },
@@ -364,7 +424,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: RED,
+    backgroundColor: Brand.playback,
   },
   seekHint: {
     position: 'absolute',
@@ -410,7 +470,7 @@ const styles = StyleSheet.create({
     left: 0,
     top: 0,
     bottom: 0,
-    backgroundColor: RED,
+    backgroundColor: Brand.playback,
   },
   seekMarker: {
     position: 'absolute',
@@ -425,6 +485,6 @@ const styles = StyleSheet.create({
     height: 12,
     marginLeft: -6,
     borderRadius: 6,
-    backgroundColor: RED,
+    backgroundColor: Brand.playback,
   },
 });
