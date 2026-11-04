@@ -58,6 +58,21 @@ export default function SettingsScreen() {
             accessibilityLabel="Bild-im-Bild"
           />
         </View>
+        <View style={styles.row}>
+          <View style={styles.flex}>
+            <ThemedText>Lautstärke angleichen</ThemedText>
+            <ThemedText type="small" themeColor="textSecondary">
+              Hebt leise Videos auf die bei YouTube übliche Lautstärke an, ähnlich wie „Stabile
+              Lautstärke“ in der YouTube-App.
+            </ThemedText>
+          </View>
+          <Switch
+            trackColor={{ false: theme.backgroundSelected, true: theme.accent }}
+            value={playback.loudness}
+            onValueChange={(loudness) => playbackSettings.update({ loudness })}
+            accessibilityLabel="Lautstärke angleichen"
+          />
+        </View>
 
         <ThemedText type="subtitle" style={styles.section}>
           SponsorBlock

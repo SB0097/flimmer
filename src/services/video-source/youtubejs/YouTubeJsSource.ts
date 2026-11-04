@@ -488,6 +488,7 @@ function toFeedPage(result: VideoFeed, channel?: ChannelRef): SearchPage {
 
 function toVideoDetails(id: string, info: YT.VideoInfo): VideoDetails {
   const b = info.basic_info;
+  const audio = info.player_config?.audio_config;
   return {
     id,
     title: b.title ?? '',
@@ -498,5 +499,6 @@ function toVideoDetails(id: string, info: YT.VideoInfo): VideoDetails {
     thumbnails: toThumbnails(b.thumbnail),
     isLive: Boolean(b.is_live),
     description: b.short_description ?? '',
+    loudnessDb: audio?.perceptual_loudness_db ?? audio?.loudness_db,
   };
 }
