@@ -13,6 +13,11 @@ export interface LibraryDatabase {
   withTransactionSync(task: () => void): void;
 }
 
+/** Mindestabstand, ab dem eine erneute Anzeige auf „Für dich“ wieder zählt. */
+export const IMPRESSION_INTERVAL = 3 * 60 * 60_000;
+/** Ältere Anzeigen zählen nicht mehr; das Video darf dann wieder ganz nach vorn. */
+export const IMPRESSION_TTL = 14 * 24 * 60 * 60_000;
+
 export class LibraryRepository {
   constructor(private readonly db: LibraryDatabase) {
     db.execSync(`
@@ -33,6 +38,9 @@ export class LibraryRepository {
         PRIMARY KEY (playlist_id, video_id)
       );
       CREATE INDEX IF NOT EXISTS library_playlist_order ON library_playlist_videos (playlist_id, position);
+      CREATE TABLE IF NOT EXISTS library_impressions (
+        video_id TEXT PRIMARY KEY NOT NULL, count INTEGER NOT NULL, last_shown_at INTEGER NOT NULL
+      );
     `);
     if (
       !db
@@ -417,6 +425,36 @@ export class LibraryRepository {
     return row
       ? { key, fetchedAt: row.fetched_at, items: JSON.parse(row.json) as VideoSummary[] }
       : undefined;
+  }
+
+  /** Wie oft Videos in den letzten zwei Wochen auf „Für dich“ zu sehen waren. */
+  readImpressions(now: number): Map<string, number> {
+    const rows = this.db.getAllSync<{ video_id: string; count: number }>(
+      'SELECT video_id, count FROM library_impressions WHERE last_shown_at >= ?',
+      now - IMPRESSION_TTL,
+    );
+    return new Map(rows.map((r) => [r.video_id, r.count]));
+  }
+
+  /** Zählt ein Video höchstens einmal pro Abstand, damit Hin- und Herscrollen nicht mehrfach zählt. */
+  recordImpressions(ids: string[], now: number): void {
+    if (!ids.length) return;
+    const due = now - IMPRESSION_INTERVAL;
+    this.db.withTransactionSync(() => {
+      for (const id of ids)
+        this.db.runSync(
+          `INSERT INTO library_impressions (video_id, count, last_shown_at) VALUES (?, 1, ?)
+           ON CONFLICT(video_id) DO UPDATE SET count = count + 1, last_shown_at = excluded.last_shown_at
+           WHERE last_shown_at < ?`,
+          id,
+          now,
+          due,
+        );
+      this.db.runSync(
+        'DELETE FROM library_impressions WHERE last_shown_at < ?',
+        now - IMPRESSION_TTL,
+      );
+    });
   }
 
   cache(batch: FeedCache): void {

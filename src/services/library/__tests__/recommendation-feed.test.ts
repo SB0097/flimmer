@@ -84,3 +84,25 @@ it('teilt gleichzeitige Abrufe derselben Quelle', async () => {
   await Promise.all([first, second]);
   expect(source.getHome).toHaveBeenCalledTimes(1);
 });
+
+it('mischt gespeicherte Vorschläge früherer Startvideos ohne neue Anfrage dazu', async () => {
+  saved.get.mockReturnValue({
+    ...empty,
+    history: Array.from({ length: 10 }, (_, i) => ({
+      video: { ...video, id: `h${i}` },
+      lastWatchedAt: 10 - i,
+      position: 0,
+      watchedSeconds: 300,
+      completed: false,
+    })),
+  });
+  saved.getCache.mockImplementation((key) =>
+    key.startsWith('related:') ? { key, fetchedAt: Date.now(), items: [video] } : undefined,
+  );
+  source.getHome.mockResolvedValue({ items: [] } as never);
+  const onItems = jest.fn();
+  await loadRecommendationFeed(false, onItems, false, 42);
+  const keys = onItems.mock.calls[0][0].map((b: { key: string }) => b.key);
+  expect(keys.filter((k: string) => k.startsWith('related:'))).toHaveLength(10);
+  expect(source.getWatchPage).not.toHaveBeenCalled();
+});

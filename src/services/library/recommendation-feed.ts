@@ -1,4 +1,4 @@
-import { recommendationSeeds, type RecommendationBatch } from '@/lib/recommendations';
+import { recommendationSeeds, seedWeights, type RecommendationBatch } from '@/lib/recommendations';
 import { videoSource } from '@/services/video-source';
 import type { VideoSummary } from '@/services/video-source/types';
 
@@ -34,10 +34,12 @@ export async function loadRecommendationFeed(
   force: boolean,
   onItems: (batches: RecommendationBatch[]) => void,
   subscriptionsOnly = false,
+  rotation?: number,
 ): Promise<{ error?: string }> {
   const { history, favorites, subscriptions } = library.get();
+  const seeds = subscriptionsOnly ? [] : recommendationSeeds(history, favorites, 6, rotation);
   const requests: Request[] = [
-    ...(subscriptionsOnly ? [] : recommendationSeeds(history, favorites)).map(([id, weight]) => ({
+    ...seeds.map(([id, weight]) => ({
       key: `related:${id}`,
       weight,
       maxAge: 86_400_000,
@@ -54,7 +56,8 @@ export async function loadRecommendationFeed(
       : [
           {
             key: 'home',
-            weight: 0.6,
+            // Allgemeine Vorschläge wechseln öfter und bringen frische Videos dazu.
+            weight: 1,
             maxAge: 4 * 60 * 60_000,
             load: async () => (await videoSource.getHome()).items,
           },
@@ -68,6 +71,16 @@ export async function loadRecommendationFeed(
       batches.set(request.key, { key: request.key, weight: request.weight, items: cache.items });
     return force || !cache || now - cache.fetchedAt > request.maxAge;
   });
+  // Gespeicherte Vorschläge früherer Startvideos mischen ohne neue Anfrage mit,
+  // solange sie nicht älter als drei Tage sind.
+  if (!subscriptionsOnly)
+    for (const [id, weight] of seedWeights(history, favorites)) {
+      const key = `related:${id}`;
+      if (batches.has(key)) continue;
+      const cache = library.getCache(key);
+      if (cache && now - cache.fetchedAt < 3 * 86_400_000)
+        batches.set(key, { key, weight, items: cache.items });
+    }
   onItems([...batches.values()]);
   // Bei vielen Abos zuerst die am längsten nicht geladenen Kanäle. Bereits
   // zwischengespeicherte Videos aller Abos bleiben in der Mischung verfügbar.
