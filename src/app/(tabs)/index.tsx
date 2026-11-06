@@ -1,8 +1,16 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 import { Image } from 'expo-image';
-import { useRouter, useScrollToTop } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, FlatList, Pressable, StyleSheet, TextInput, View } from 'react-native';
+import { useFocusEffect, useRouter, useScrollToTop } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  TextInput,
+  View,
+  type ListViewToken,
+} from 'react-native';
 import Animated from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -15,7 +23,11 @@ import { Spacing } from '@/constants/theme';
 import { useForYou } from '@/hooks/use-for-you';
 import { useTheme } from '@/hooks/use-theme';
 import { parseVideoId } from '@/lib/youtube-url';
+import { library } from '@/services/library/store';
 import { videoSource, type SearchPage, type VideoSummary } from '@/services/video-source';
+
+/** Ein Video zählt als gezeigt, wenn es 1,5 Sekunden lang größtenteils sichtbar war. */
+const VIEWABILITY = { itemVisiblePercentThreshold: 60, minimumViewTime: 1500 };
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -34,6 +46,30 @@ export default function HomeScreen() {
   const nextPage = useRef<SearchPage['next']>(undefined);
   const busy = useRef(false);
   const request = useRef(0);
+  const searchingRef = useRef(false);
+  useEffect(() => {
+    searchingRef.current = searching;
+  }, [searching]);
+  const counted = useRef(new Set<string>());
+  // FlatList verlangt einen stabilen Callback. Gezählt wird nur „Für dich“,
+  // jedes Video höchstens einmal, solange die Startseite offen ist.
+  const onViewableItemsChanged = useCallback(
+    ({ viewableItems }: { viewableItems: ListViewToken[] }) => {
+      if (searchingRef.current) return;
+      const fresh = viewableItems
+        .map((token) => token.item?.id)
+        .filter((id): id is string => !!id && !counted.current.has(id));
+      fresh.forEach((id) => counted.current.add(id));
+      if (fresh.length) library.recordImpressions(fresh);
+    },
+    [],
+  );
+  // Bei jedem Zurückkehren neu zählen; die Datenbank wertet höchstens alle drei Stunden.
+  useFocusEffect(
+    useCallback(() => {
+      counted.current.clear();
+    }, []),
+  );
 
   const goHome = () => {
     chrome.show();
@@ -166,6 +202,8 @@ export default function HomeScreen() {
         data={shown}
         keyExtractor={(v) => v.id}
         renderItem={({ item }) => <VideoCard video={item} />}
+        viewabilityConfig={VIEWABILITY}
+        onViewableItemsChanged={onViewableItemsChanged}
         onEndReached={() => {
           if (searching && !error) void loadMore();
         }}

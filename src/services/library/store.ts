@@ -115,6 +115,21 @@ export const library = {
       return undefined;
     }
   },
+  impressions(): Map<string, number> {
+    try {
+      return db().readImpressions(Date.now());
+    } catch {
+      return new Map();
+    }
+  },
+  recordImpressions(ids: string[]): void {
+    // Nur ein Hilfssignal für die Startseite; Fehler dürfen die Bibliothek nicht stören.
+    try {
+      db().recordImpressions(ids, Date.now());
+    } catch {
+      /* Ohne Zählung bleibt die Startseite wie bisher sortiert. */
+    }
+  },
   cache(batch: FeedCache): void {
     // Ein fehlgeschlagener Vorschlags-Cache darf die aktuelle Bibliothek nicht verdecken.
     try {
