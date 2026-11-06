@@ -2,6 +2,8 @@
 
 Werbefreier YouTube-Player für Android, gebaut mit Expo.
 
+> 🚧 Frühe Entwicklungsphase
+
 - Keine Werbung, Sponsor-Teile werden per [SponsorBlock](https://sponsor.ajay.app) übersprungen
 - Kein Google-Konto nötig; Verlauf, Favoriten, Abos und Playlists werden lokal gespeichert
 - Hintergrund-Wiedergabe und Bild-in-Bild
@@ -12,6 +14,16 @@ Werbefreier YouTube-Player für Android, gebaut mit Expo.
 - Lokaler Import von Abos, Verlauf und Playlists aus Google Takeout
 - Untertitel mit Sprachwahl, einschließlich automatisch erzeugter Spuren
 - Kompakte Leisten, Flimmer-Logo und Petrol-Akzente im hellen und dunklen Design
+
+### In English
+
+Flimmer is a privacy-focused YouTube client for Android, built with Expo, React Native and
+TypeScript. It needs no Google account: history, favorites, subscriptions and playlists are
+stored locally on the device. Features include SponsorBlock, background playback and
+picture-in-picture, a swipeable mini player, offline downloads, subtitles, a local
+"For you" feed and Google Takeout import. Every pull request is checked by CI (typecheck,
+lint, formatting, Jest tests); APKs are built with EAS Build. The sections below (German)
+describe the features in detail.
 
 ## Bibliothek und Startseite
 
@@ -92,8 +104,6 @@ Takeout enthält keine genauen Sehpositionen oder angesehenen Dauern. Importiert
 wird deshalb gekennzeichnet und als Interesse für „Für dich“ berücksichtigt. Bei unbekannten
 HTML-Datumsformaten steht „Zeitpunkt unbekannt“. Fehlende Metadaten von Playlist-Videos
 werden beim späteren Öffnen ergänzt. Für den Import ist kein Google-Login in Flimmer nötig.
-
-> 🚧 Frühe Entwicklungsphase
 
 ## Untertitel
 
