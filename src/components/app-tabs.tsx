@@ -1,5 +1,11 @@
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
-import { Tabs, BottomTabBar, type BottomTabBarProps } from 'expo-router/tabs';
+import { PlatformPressable } from 'expo-router/react-navigation';
+import {
+  Tabs,
+  BottomTabBar,
+  type BottomTabBarButtonProps,
+  type BottomTabBarProps,
+} from 'expo-router/tabs';
 import { StyleSheet } from 'react-native';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 
@@ -15,6 +21,18 @@ function ScrollingTabBar(props: BottomTabBarProps) {
     <Animated.View style={[styles.bar, { height: barHeight }, style]}>
       <BottomTabBar {...props} />
     </Animated.View>
+  );
+}
+
+// Der Standard-Tippeffekt ist auf Android randlos: ein großer Kreis, der über die Leiste
+// und die Systemnavigation hinausläuft. Stattdessen eine abgerundete Fläche im Tab.
+function TabButton({ style, ...props }: BottomTabBarButtonProps) {
+  return (
+    <PlatformPressable
+      {...props}
+      android_ripple={{ borderless: false, foreground: true }}
+      style={[style, styles.button]}
+    />
   );
 }
 
@@ -37,6 +55,7 @@ function AppTabNavigator() {
           backgroundColor: theme.background,
         },
         tabBarItemStyle: { paddingTop: 4, paddingBottom: 2 },
+        tabBarButton: (props) => <TabButton {...props} />,
         tabBarLabelStyle: { fontSize: 11, lineHeight: 14, fontWeight: '600' },
       }}>
       <Tabs.Screen
@@ -79,4 +98,5 @@ export default function AppTabs() {
 
 const styles = StyleSheet.create({
   bar: { position: 'absolute', bottom: 0, left: 0, right: 0 },
+  button: { marginHorizontal: 24, borderRadius: 16, overflow: 'hidden' },
 });
