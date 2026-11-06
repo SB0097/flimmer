@@ -74,3 +74,8 @@ export function pauseIfPipDismissed(player: VideoPlayer, graceMs = 800) {
 export function setPlayerVolume(player: VideoPlayer, volume: number) {
   player.volume = volume;
 }
+
+/** Leise Videos anheben (dB, 0 = aus). Eigene Android-Erweiterung im expo-video-Patch. */
+export function setLoudnessGain(player: VideoPlayer, gainDb: number) {
+  (player as VideoPlayer & { loudnessGainDb?: number }).loudnessGainDb = gainDb;
+}

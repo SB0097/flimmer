@@ -398,7 +398,9 @@ export default function WatchScreen() {
         ]}>
         {/* Hintergrund extra, damit er beim Runterziehen ausblenden kann (App darunter wird sichtbar) */}
         {!isFullscreen ? (
-          <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+          // Reicht bis unter die Systemnavigation: Der Inhalt endet über ihr (paddingBottom),
+          // ohne eigene Fläche schiene dort sonst die durchsichtige Seite darunter durch.
+          <View pointerEvents="none" style={[StyleSheet.absoluteFill, { bottom: -insets.bottom }]}>
             <Animated.View
               style={[styles.statusBand, { height: portraitTop, opacity: swipe.backgroundOpacity }]}
             />

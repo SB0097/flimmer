@@ -38,6 +38,8 @@ export interface VideoDetails extends VideoSummary {
   likeCount?: number;
   /** Absolutes Datum, z. B. „Premiere am 31.12.2021“ */
   dateText?: string;
+  /** Von YouTube gemessene Lautheit des Tons (LUFS, z. B. -18.5) */
+  loudnessDb?: number;
 }
 
 /** Alles für die Player-Seite außer dem Stream selbst */

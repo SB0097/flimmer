@@ -44,6 +44,7 @@ jest.mock('../background', () => ({ applyPlaybackSettings: jest.fn() }));
 jest.mock('../captions', () => ({ loadCaption: jest.fn() }));
 jest.mock('../player-actions', () => ({
   playSource: jest.fn(async () => {}),
+  setLoudnessGain: jest.fn(),
   setPlayerVolume: jest.fn(),
   setPlayerSubtitle: jest.fn((player, track) => {
     player.subtitleTrack = track;

@@ -7,7 +7,12 @@ import { join } from 'node:path';
 
 import type { VideoSummary } from '@/services/video-source/types';
 
-import { LibraryRepository, type LibraryDatabase } from '../repository';
+import {
+  IMPRESSION_INTERVAL,
+  IMPRESSION_TTL,
+  LibraryRepository,
+  type LibraryDatabase,
+} from '../repository';
 import type { LibraryImport } from '../import-types';
 
 function adapter(sqlite: DatabaseSync): LibraryDatabase {
@@ -315,6 +320,33 @@ it('rollt Playlist und Metadaten zurück, wenn das erste Video nicht gespeichert
     expect(() => repo.createPlaylist('p', 'Atomar', 1, video('a'))).toThrow();
     expect(repo.read().playlists).toEqual([]);
     expect(sqlite.prepare('SELECT * FROM library_videos').all()).toEqual([]);
+  } finally {
+    sqlite.close();
+  }
+});
+
+it('zählt Anzeigen auf „Für dich“ höchstens alle drei Stunden und vergisst sie nach zwei Wochen', () => {
+  const sqlite = new DatabaseSync(':memory:');
+  try {
+    const repo = new LibraryRepository(adapter(sqlite));
+    const hour = 60 * 60_000;
+    repo.recordImpressions(['a', 'b'], 0);
+    repo.recordImpressions(['a'], hour);
+    expect(repo.readImpressions(hour)).toEqual(
+      new Map([
+        ['a', 1],
+        ['b', 1],
+      ]),
+    );
+    repo.recordImpressions(['a'], IMPRESSION_INTERVAL + 1);
+    repo.recordImpressions([], IMPRESSION_INTERVAL + 2);
+    expect(repo.readImpressions(IMPRESSION_INTERVAL + 2).get('a')).toBe(2);
+    const later = IMPRESSION_TTL + IMPRESSION_INTERVAL;
+    expect(repo.readImpressions(later)).toEqual(new Map([['a', 2]]));
+    repo.recordImpressions(['c'], later);
+    expect(
+      sqlite.prepare('SELECT video_id FROM library_impressions ORDER BY video_id').all(),
+    ).toEqual([{ video_id: 'a' }, { video_id: 'c' }]);
   } finally {
     sqlite.close();
   }
